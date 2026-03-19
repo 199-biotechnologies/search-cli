@@ -28,6 +28,7 @@ owo-colors = "4"
 indicatif = "0.17"
 self_update = { version = "0.43", features = ["rustls"] }
 backon = "1"
+url = "2.5.8"
 
 [dev-dependencies]
 assert_cmd = "2"

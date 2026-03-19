@@ -2,7 +2,7 @@ use crate::classify::classify_intent;
 use crate::context::AppContext;
 use crate::errors::SearchError;
 use crate::providers::{self, Provider};
-use crate::types::{Mode, ResponseMetadata, SearchOpts, SearchResponse, SearchResult};
+use crate::types::{Mode, ResponseMetadata, SearchOpts, SearchResponse};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,11 +12,11 @@ use tokio::time::timeout;
 /// Which providers to query for each mode
 fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
     match mode {
-        Mode::Auto | Mode::General => &["brave", "serper", "exa", "jina", "tavily"],
-        Mode::News => &["brave", "serper", "tavily"],
-        Mode::Academic => &["exa", "serper", "tavily"],
-        Mode::Deep => &["exa", "serper", "tavily"],
-        Mode::Scholar => &["serper"],
+        Mode::Auto | Mode::General => &["brave", "serper", "exa", "jina", "tavily", "perplexity"],
+        Mode::News => &["brave", "serper", "tavily", "perplexity"],
+        Mode::Academic => &["exa", "serper", "tavily", "perplexity"],
+        Mode::Deep => &["exa", "serper", "tavily", "perplexity"],
+        Mode::Scholar => &["serper", "serpapi"],
         Mode::Patents => &["serper"],
         Mode::People => &["exa"],
         Mode::Images => &["serper"],
@@ -191,6 +191,21 @@ pub async fn execute_special(
                         Err(_) => {
                             providers_failed.push("serper".to_string());
                         }
+                    }
+                }
+            }
+            // Also try SerpApi for scholar
+            let serpapi = providers::serpapi::SerpApi::new(ctx.clone());
+            if serpapi.is_configured() && provider_allowed("serpapi", only_providers) {
+                providers_queried.push("serpapi".to_string());
+                match timeout(Duration::from_secs(10), serpapi.search_scholar(query, count)).await {
+                    Ok(Ok(items)) => results.extend(items),
+                    Ok(Err(e)) => {
+                        providers_failed.push("serpapi".to_string());
+                        tracing::warn!("serpapi scholar: {e}");
+                    }
+                    Err(_) => {
+                        providers_failed.push("serpapi".to_string());
                     }
                 }
             }

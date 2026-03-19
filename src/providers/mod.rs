@@ -2,6 +2,8 @@ pub mod brave;
 pub mod exa;
 pub mod firecrawl;
 pub mod jina;
+pub mod perplexity;
+pub mod serpapi;
 pub mod serper;
 pub mod tavily;
 
@@ -50,5 +52,7 @@ pub fn build_providers(ctx: &Arc<AppContext>) -> Vec<Box<dyn Provider>> {
         Box::new(jina::Jina::new(ctx.clone())),
         Box::new(firecrawl::Firecrawl::new(ctx.clone())),
         Box::new(tavily::Tavily::new(ctx.clone())),
+        Box::new(perplexity::Perplexity::new(ctx.clone())),
+        Box::new(serpapi::SerpApi::new(ctx.clone())),
     ]
 }

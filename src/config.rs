@@ -26,6 +26,10 @@ pub struct ApiKeys {
     pub firecrawl: String,
     #[serde(default)]
     pub tavily: String,
+    #[serde(default)]
+    pub serpapi: String,
+    #[serde(default)]
+    pub perplexity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +57,8 @@ impl Default for AppConfig {
                 jina: String::new(),
                 firecrawl: String::new(),
                 tavily: String::new(),
+                serpapi: String::new(),
+                perplexity: String::new(),
             },
             settings: Settings {
                 timeout: default_timeout(),
@@ -118,6 +124,8 @@ pub fn config_show(config: &AppConfig) {
         ("jina", &config.keys.jina),
         ("firecrawl", &config.keys.firecrawl),
         ("tavily", &config.keys.tavily),
+        ("serpapi", &config.keys.serpapi),
+        ("perplexity", &config.keys.perplexity),
     ];
 
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
@@ -199,6 +207,8 @@ pub fn config_check(config: &AppConfig) {
         ("jina", &config.keys.jina, "Web search + URL reader"),
         ("firecrawl", &config.keys.firecrawl, "Web scraping + extraction"),
         ("tavily", &config.keys.tavily, "General, News, Academic, Deep search"),
+        ("serpapi", &config.keys.serpapi, "80+ engines: Google, Bing, YouTube, Baidu, Scholar"),
+        ("perplexity", &config.keys.perplexity, "AI-powered answers with citations (Perplexity Sonar)"),
     ];
 
     if c {
