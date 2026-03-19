@@ -15,22 +15,67 @@ use config::{config_check, config_set, config_show, load_config};
 use context::AppContext;
 use output::OutputFormat;
 use std::sync::Arc;
+use tokio::net::lookup_host;
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::WARN.into()),
-        )
-        .with_target(false)
-        .with_writer(std::io::stderr)
-        .init();
+    // 1. Pre-emptive DNS resolution (starts immediately in background)
+    // Priming the OS DNS cache for the most likely API domains.
+    tokio::spawn(async {
+        let domains = [
+            "api.search.brave.com:443",
+            "google.serper.dev:443",
+            "api.exa.ai:443",
+            "api.jina.ai:443",
+            "api.tavily.com:443",
+            "api.perplexity.ai:443",
+        ];
+        for domain in domains {
+            let _ = lookup_host(domain).await;
+        }
+    });
 
+    // 2. Start loading config in parallel with CLI parsing
+    let config_handle = tokio::task::spawn_blocking(|| load_config());
+
+    // 3. CLI Parsing (fast, but we want to overlap it with I/O)
     let cli = Cli::parse();
     let format = OutputFormat::detect(cli.json);
 
-    let exit_code = match run(cli, &format).await {
+    // 4. Wait for config
+    let config = match config_handle.await.unwrap() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Config error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let ctx = Arc::new(AppContext::new(config));
+
+    // 5. Pre-emptive TLS Handshake (Unconventional: Race to the wire)
+    // If this is a search command, start Warming up TLS sessions for the "Big 3".
+    let is_search = cli.command.is_none() || matches!(cli.command, Some(Commands::Search(_)));
+    if is_search && !cli.last {
+        let ctx_c = ctx.clone();
+        tokio::spawn(async move {
+            let urls = [
+                "https://api.search.brave.com/res/v1/web/search",
+                "https://google.serper.dev/search",
+                "https://api.exa.ai/search",
+            ];
+            for url in urls {
+                // Send a HEAD request to trigger TLS handshake + connection pooling.
+                // We don't care about the result, just want the connection established.
+                let _ = ctx_c.client.head(url).send().await;
+            }
+        });
+    }
+
+    let exit_code = match run(cli, &format, ctx).await {
         Ok(code) => code,
         Err(e) => {
             match format {
@@ -44,12 +89,11 @@ async fn main() {
     std::process::exit(exit_code);
 }
 
-async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError> {
+async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i32, errors::SearchError> {
     // Handle bare `search "query"` without subcommand
     let command = if let Some(cmd) = cli.command {
         cmd
     } else if cli.last {
-        // --last with no subcommand: synthesize a Search command (query is ignored)
         Commands::Search(cli::SearchArgs {
             query: String::new(),
             mode: types::Mode::Auto,
@@ -71,7 +115,6 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
             freshness: None,
         })
     } else {
-        // No command and no query — show help
         use clap::CommandFactory;
         Cli::command().print_help().ok();
         println!();
@@ -80,7 +123,6 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
 
     match command {
         Commands::Search(args) => {
-            // --last: replay cached result instead of searching
             if cli.last {
                 if let Some(cached) = cache::load_last() {
                     match *format {
@@ -94,19 +136,17 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
                 }
             }
 
-            let config = load_config().map_err(|e| errors::SearchError::Config(e.to_string()))?;
-            let count = args.count.unwrap_or(config.settings.count);
-            let ctx = Arc::new(AppContext::new(config));
-
+            let count = args.count.unwrap_or(ctx.config.settings.count);
             let opts = types::SearchOpts {
                 include_domains: args.domain.unwrap_or_default(),
                 exclude_domains: args.exclude_domain.unwrap_or_default(),
                 freshness: args.freshness,
             };
 
-            // Check query cache (5min TTL) — skip if domain/freshness filters are set
+            // Check query cache (5min TTL) — skip if filters or provider selection is active
             let mode_str = args.mode.to_string();
-            if opts.include_domains.is_empty()
+            if args.providers.is_none()
+                && opts.include_domains.is_empty()
                 && opts.exclude_domains.is_empty()
                 && opts.freshness.is_none()
             {
@@ -124,9 +164,7 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
                 let sp = indicatif::ProgressBar::new_spinner();
                 sp.set_style(
                     indicatif::ProgressStyle::default_spinner()
-                        .tick_strings(&[
-                            "   ", ".  ", ".. ", "...", " ..", "  .", "   ",
-                        ])
+                        .tick_strings(&["   ", ".  ", ".. ", "...", " ..", "  .", "   "])
                         .template("  {spinner:.cyan} searching {msg}")
                         .unwrap(),
                 );
@@ -168,20 +206,16 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
         }
 
         Commands::Config { action } => {
-            let config = load_config().map_err(|e| errors::SearchError::Config(e.to_string()))?;
             match action {
-                ConfigAction::Show => config_show(&config),
+                ConfigAction::Show => config_show(&ctx.config),
                 ConfigAction::Set { key, value } => config_set(&key, &value)?,
-                ConfigAction::Check => config_check(&config),
+                ConfigAction::Check => config_check(&ctx.config),
             }
             Ok(0)
         }
 
         Commands::AgentInfo => {
-            let config = load_config().map_err(|e| errors::SearchError::Config(e.to_string()))?;
-            let ctx = Arc::new(AppContext::new(config));
             let all = providers::build_providers(&ctx);
-
             let providers_info: Vec<serde_json::Value> = all
                 .iter()
                 .map(|p| {
@@ -210,10 +244,7 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
         }
 
         Commands::Providers => {
-            let config = load_config().map_err(|e| errors::SearchError::Config(e.to_string()))?;
-            let ctx = Arc::new(AppContext::new(config));
             let all = providers::build_providers(&ctx);
-
             let provider_info: Vec<(String, bool, Vec<String>)> = all
                 .iter()
                 .map(|p| {
@@ -247,7 +278,6 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
                     output::table::render_providers(&provider_info);
                 }
             }
-
             Ok(0)
         }
 

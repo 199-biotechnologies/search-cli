@@ -35,8 +35,32 @@ pub async fn execute_search(
     opts: &SearchOpts,
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
+    let query_arc: Arc<str> = Arc::from(query);
 
-    let resolved_mode = if mode == Mode::Auto {
+    // Speculative Execution: If in Auto mode, we don't wait for classification 
+    // to start the most likely providers (Brave, Serper).
+    let mut speculative_set = JoinSet::new();
+    let is_auto = mode == Mode::Auto;
+    
+    if is_auto && only_providers.is_none() {
+        // Only speculate if we have keys and it's not a filtered provider list
+        if !ctx.config.keys.brave.is_empty() {
+            let q = query_arc.clone();
+            let c = count;
+            let o = opts.clone();
+            let p = providers::brave::Brave::new(ctx.clone());
+            speculative_set.spawn(async move { ("brave", p.search(&q, c, &o).await) });
+        }
+        if !ctx.config.keys.serper.is_empty() {
+            let q = query_arc.clone();
+            let c = count;
+            let o = opts.clone();
+            let p = providers::serper::Serper::new(ctx.clone());
+            speculative_set.spawn(async move { ("serper", p.search(&q, c, &o).await) });
+        }
+    }
+
+    let resolved_mode = if is_auto {
         classify_intent(query)
     } else {
         mode
@@ -49,6 +73,9 @@ pub async fn execute_search(
         .into_iter()
         .filter(|p| {
             let name = p.name();
+            // Don't restart speculative ones (they already launched above)
+            if is_auto && only_providers.is_none() && (name == "brave" || name == "serper") { return false; }
+            
             let in_mode_set = wanted.contains(&name);
             let in_filter = only_providers
                 .as_ref()
@@ -58,22 +85,27 @@ pub async fn execute_search(
         })
         .collect();
 
-    if active.is_empty() {
+    if active.is_empty() && speculative_set.len() == 0 {
         return Err(SearchError::NoProviders(resolved_mode.to_string()));
     }
 
     let mut set = JoinSet::new();
     let mut providers_queried = Vec::new();
 
+    // Re-add speculative ones to the tracking list
+    if is_auto && only_providers.is_none() {
+        if !ctx.config.keys.brave.is_empty() { providers_queried.push("brave".to_string()); }
+        if !ctx.config.keys.serper.is_empty() { providers_queried.push("serper".to_string()); }
+    }
+
     for provider in active {
-        let q = query.to_string();
+        let q = query_arc.clone();
         let c = count;
         let name = provider.name();
         let tout = provider.timeout();
         let sopts = opts.clone();
         providers_queried.push(name.to_string());
 
-        // Choose the right method based on mode
         match resolved_mode {
             Mode::News => {
                 set.spawn(async move {
@@ -94,7 +126,21 @@ pub async fn execute_search(
     let mut providers_failed = Vec::new();
     let mut unique_urls = HashSet::new();
 
-    // Early return: once we have enough unique results, abort remaining providers
+    // Process speculative results first (they had a head start)
+    while let Some(res) = speculative_set.join_next().await {
+        if let Ok((name, Ok(items))) = res {
+            for item in items {
+                if unique_urls.insert(normalize_url(&item.url)) {
+                    all_results.push(item);
+                }
+            }
+        } else if let Ok((name, Err(e))) = res {
+            tracing::warn!("{name} speculative failed: {e}");
+            providers_failed.push(name.to_string());
+        }
+    }
+
+    // Process the rest
     while let Some(join_result) = set.join_next().await {
         match join_result {
             Ok((_name, Ok(Ok(items)))) => {

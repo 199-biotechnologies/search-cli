@@ -127,7 +127,14 @@ impl super::Provider for Brave {
                 });
             }
 
-            let body: BraveResponse = resp.json().await?;
+            let body_bytes = resp.bytes().await?;
+            let mut body_vec = body_bytes.to_vec();
+            let body: BraveResponse = simd_json::from_slice(&mut body_vec)
+                .map_err(|e| SearchError::Api {
+                    provider: "brave",
+                    code: "json_error",
+                    message: e.to_string(),
+                })?;
             let results = body
                 .web
                 .map(|w| w.results)
@@ -181,7 +188,14 @@ impl super::Provider for Brave {
                 });
             }
 
-            let body: BraveResponse = resp.json().await?;
+            let body_bytes = resp.bytes().await?;
+            let mut body_vec = body_bytes.to_vec();
+            let body: BraveResponse = simd_json::from_slice(&mut body_vec)
+                .map_err(|e| SearchError::Api {
+                    provider: "brave",
+                    code: "json_error",
+                    message: e.to_string(),
+                })?;
             let results = body
                 .news
                 .map(|n| n.results)
