@@ -4,18 +4,31 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
+    /// Auto-detect intent from query (default)
     Auto,
+    /// General web search (Brave + Serper + Exa + Jina)
     General,
+    /// Breaking news and current events (Brave News + Serper News)
     News,
+    /// Research papers and studies (Exa + Serper)
     Academic,
+    /// Find people, LinkedIn profiles (Exa)
     People,
+    /// Comprehensive multi-engine coverage (Exa + Serper)
     Deep,
+    /// Extract full text content from a URL (Jina Reader -> Firecrawl)
     Extract,
+    /// Find pages similar to a URL (Exa findSimilar)
     Similar,
+    /// Scrape page content (Jina Reader -> Firecrawl)
     Scrape,
+    /// Google Scholar search (Serper)
     Scholar,
+    /// Patent search (Serper)
     Patents,
+    /// Image search (Serper)
     Images,
+    /// Local businesses and places (Serper)
     Places,
 }
 

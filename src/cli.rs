@@ -5,7 +5,24 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "search",
     version,
-    about = "Agent-friendly multi-provider search CLI"
+    about = "Agent-friendly multi-provider search CLI",
+    long_about = "Aggregates 5 search APIs (Brave, Serper, Exa, Jina, Firecrawl) with 13 search modes.\n\
+        Auto-detects intent from your query and routes to the best providers.\n\
+        Outputs colored tables for humans, JSON when piped to other tools.\n\n\
+        PROVIDERS:\n  \
+          brave      Independent web index (35B pages), news search\n  \
+          serper     Google SERP: web, news, scholar, patents, images, places\n  \
+          exa        Neural/semantic search, LinkedIn people, find-similar\n  \
+          jina       Fast web search + URL-to-markdown reader\n  \
+          firecrawl  JS-rendered page scraping + structured extraction\n\n\
+        EXAMPLES:\n  \
+          search \"rust error handling\"                    # auto-detect mode\n  \
+          search search -q \"CRISPR\" -m academic           # academic papers\n  \
+          search search -q \"CEO of Stripe\" -m people      # LinkedIn profiles via Exa\n  \
+          search search -q \"AI news\" -m news              # breaking news\n  \
+          search search -q \"query\" -p exa                 # force Exa only\n  \
+          search search -q \"query\" -p exa,brave           # only Exa + Brave\n  \
+          search \"query\" --json | jq '.results[].url'     # pipe JSON to jq"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -26,10 +43,10 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Search across providers
+    /// Search across providers (use -m for mode, -p to pick providers)
     Search(SearchArgs),
 
-    /// Manage configuration
+    /// Manage configuration (show, set, check)
     Config {
         #[command(subcommand)]
         action: ConfigAction,
@@ -38,7 +55,7 @@ pub enum Commands {
     /// Show machine-readable capabilities (for agents)
     AgentInfo,
 
-    /// List all providers and their status
+    /// List all providers with status and capabilities
     Providers,
 
     /// Check for updates or self-update
@@ -55,26 +72,30 @@ pub struct SearchArgs {
     #[arg(short, long)]
     pub query: String,
 
-    /// Search mode
+    /// Search mode [auto detects from query]
     #[arg(short, long, value_enum, default_value = "auto")]
     pub mode: Mode,
 
-    /// Number of results
+    /// Number of results to return
     #[arg(short, long)]
     pub count: Option<usize>,
+
+    /// Use only specific providers (comma-separated: brave,exa,serper,jina,firecrawl)
+    #[arg(short, long, value_delimiter = ',')]
+    pub providers: Option<Vec<String>>,
 }
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
-    /// Show current configuration (keys masked)
+    /// Show current configuration (API keys masked)
     Show,
-    /// Set a configuration value
+    /// Set a configuration value (e.g. keys.brave YOUR_KEY)
     Set {
         /// Config key (e.g. keys.brave, settings.timeout)
         key: String,
         /// Value to set
         value: String,
     },
-    /// Check which providers are configured
+    /// Health-check which providers are configured and ready
     Check,
 }

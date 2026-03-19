@@ -30,6 +30,7 @@ pub async fn execute_search(
     query: &str,
     mode: Mode,
     count: usize,
+    only_providers: &Option<Vec<String>>,
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
 
@@ -44,7 +45,15 @@ pub async fn execute_search(
 
     let active: Vec<Box<dyn Provider>> = all_providers
         .into_iter()
-        .filter(|p| wanted.contains(&p.name()) && p.is_configured())
+        .filter(|p| {
+            let name = p.name();
+            let in_mode_set = wanted.contains(&name);
+            let in_filter = only_providers
+                .as_ref()
+                .map(|list| list.iter().any(|f| f.eq_ignore_ascii_case(name)))
+                .unwrap_or(true);
+            (in_mode_set || only_providers.is_some()) && in_filter && p.is_configured()
+        })
         .collect();
 
     if active.is_empty() {
@@ -138,12 +147,19 @@ fn normalize_url(url: &str) -> String {
         .to_lowercase()
 }
 
+fn provider_allowed(name: &str, only: &Option<Vec<String>>) -> bool {
+    only.as_ref()
+        .map(|list| list.iter().any(|f| f.eq_ignore_ascii_case(name)))
+        .unwrap_or(true)
+}
+
 /// Handle special modes that need direct provider method calls
 pub async fn execute_special(
     ctx: Arc<AppContext>,
     query: &str,
     mode: Mode,
     count: usize,
+    only_providers: &Option<Vec<String>>,
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
     let all_providers = providers::build_providers(&ctx);
@@ -154,7 +170,7 @@ pub async fn execute_special(
     match mode {
         Mode::Scholar => {
             for p in &all_providers {
-                if p.name() == "serper" && p.is_configured() {
+                if p.name() == "serper" && p.is_configured() && provider_allowed("serper", only_providers) {
                     providers_queried.push("serper".to_string());
                     // Downcast to Serper for scholar-specific method
                     let serper = providers::serper::Serper::new(ctx.clone());
@@ -173,7 +189,7 @@ pub async fn execute_special(
         }
         Mode::Patents => {
             let serper = providers::serper::Serper::new(ctx.clone());
-            if serper.is_configured() {
+            if serper.is_configured() && provider_allowed("serper", only_providers) {
                 providers_queried.push("serper".to_string());
                 match timeout(Duration::from_secs(10), serper.search_patents(query, count)).await {
                     Ok(Ok(items)) => results.extend(items),
@@ -187,7 +203,7 @@ pub async fn execute_special(
         }
         Mode::Images => {
             let serper = providers::serper::Serper::new(ctx.clone());
-            if serper.is_configured() {
+            if serper.is_configured() && provider_allowed("serper", only_providers) {
                 providers_queried.push("serper".to_string());
                 match timeout(Duration::from_secs(10), serper.search_images(query, count)).await {
                     Ok(Ok(items)) => results.extend(items),
@@ -201,7 +217,7 @@ pub async fn execute_special(
         }
         Mode::Places => {
             let serper = providers::serper::Serper::new(ctx.clone());
-            if serper.is_configured() {
+            if serper.is_configured() && provider_allowed("serper", only_providers) {
                 providers_queried.push("serper".to_string());
                 match timeout(Duration::from_secs(10), serper.search_places(query, count)).await {
                     Ok(Ok(items)) => results.extend(items),
@@ -215,7 +231,7 @@ pub async fn execute_special(
         }
         Mode::People => {
             let exa = providers::exa::Exa::new(ctx.clone());
-            if exa.is_configured() {
+            if exa.is_configured() && provider_allowed("exa", only_providers) {
                 providers_queried.push("exa".to_string());
                 match timeout(Duration::from_secs(15), exa.search_people(query, count)).await {
                     Ok(Ok(items)) => results.extend(items),
@@ -229,7 +245,7 @@ pub async fn execute_special(
         }
         Mode::Similar => {
             let exa = providers::exa::Exa::new(ctx.clone());
-            if exa.is_configured() {
+            if exa.is_configured() && provider_allowed("exa", only_providers) {
                 providers_queried.push("exa".to_string());
                 match timeout(Duration::from_secs(15), exa.find_similar(query, count)).await {
                     Ok(Ok(items)) => results.extend(items),
@@ -244,7 +260,7 @@ pub async fn execute_special(
         Mode::Scrape | Mode::Extract => {
             // Try Jina reader first, then Firecrawl
             let jina = providers::jina::Jina::new(ctx.clone());
-            if jina.is_configured() {
+            if jina.is_configured() && provider_allowed("jina", only_providers) {
                 providers_queried.push("jina".to_string());
                 match timeout(Duration::from_secs(30), jina.read_url(query)).await {
                     Ok(Ok(items)) => results.extend(items),
@@ -257,7 +273,7 @@ pub async fn execute_special(
             }
             if results.is_empty() {
                 let fc = providers::firecrawl::Firecrawl::new(ctx.clone());
-                if fc.is_configured() {
+                if fc.is_configured() && provider_allowed("firecrawl", only_providers) {
                     providers_queried.push("firecrawl".to_string());
                     match timeout(Duration::from_secs(30), fc.scrape_url(query)).await {
                         Ok(Ok(items)) => results.extend(items),
@@ -302,6 +318,7 @@ pub async fn run(
     query: &str,
     mode: Mode,
     count: usize,
+    only_providers: &Option<Vec<String>>,
 ) -> Result<SearchResponse, SearchError> {
     let resolved_mode = if mode == Mode::Auto {
         classify_intent(query)
@@ -312,9 +329,9 @@ pub async fn run(
     let mut response = match resolved_mode {
         Mode::Scholar | Mode::Patents | Mode::Images | Mode::Places | Mode::People
         | Mode::Similar | Mode::Scrape | Mode::Extract => {
-            execute_special(ctx, query, resolved_mode, count).await?
+            execute_special(ctx, query, resolved_mode, count, only_providers).await?
         }
-        _ => execute_search(ctx, query, resolved_mode, count).await?,
+        _ => execute_search(ctx, query, resolved_mode, count, only_providers).await?,
     };
 
     response.metadata.result_count = response.results.len();

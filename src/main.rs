@@ -53,6 +53,7 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
             query,
             mode: types::Mode::Auto,
             count: None,
+            providers: None,
         })
     } else {
         // No command and no query — show help
@@ -73,18 +74,31 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
                 let sp = indicatif::ProgressBar::new_spinner();
                 sp.set_style(
                     indicatif::ProgressStyle::default_spinner()
-                        .tick_strings(&[".", "..", "...", "....", ".....", ""])
-                        .template("{spinner} Searching {msg}")
+                        .tick_strings(&[
+                            "   ", ".  ", ".. ", "...", " ..", "  .", "   ",
+                        ])
+                        .template("  {spinner:.cyan} searching {msg}")
                         .unwrap(),
                 );
-                sp.set_message(format!("for \"{}\"", args.query));
-                sp.enable_steady_tick(std::time::Duration::from_millis(120));
+                let provider_hint = args
+                    .providers
+                    .as_ref()
+                    .map(|p| format!(" via {}", p.join(", ")))
+                    .unwrap_or_default();
+                sp.set_message(format!(
+                    "\"{}\" [{}{}]",
+                    args.query,
+                    args.mode,
+                    provider_hint
+                ));
+                sp.enable_steady_tick(std::time::Duration::from_millis(100));
                 Some(sp)
             } else {
                 None
             };
 
-            let response = engine::run(ctx, &args.query, args.mode, count).await;
+            let response =
+                engine::run(ctx, &args.query, args.mode, count, &args.providers).await;
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
