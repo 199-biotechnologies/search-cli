@@ -39,6 +39,10 @@ pub struct Cli {
     /// Suppress non-essential output
     #[arg(long, global = true)]
     pub quiet: bool,
+
+    /// Replay the last search result from cache
+    #[arg(long, global = true)]
+    pub last: bool,
 }
 
 #[derive(Subcommand)]
@@ -80,9 +84,21 @@ pub struct SearchArgs {
     #[arg(short, long)]
     pub count: Option<usize>,
 
-    /// Use only specific providers (comma-separated: brave,exa,serper,jina,firecrawl)
+    /// Use only specific providers (comma-separated: brave,exa,serper,jina,firecrawl,tavily)
     #[arg(short, long, value_delimiter = ',')]
     pub providers: Option<Vec<String>>,
+
+    /// Include only results from these domains (comma-separated)
+    #[arg(short, long, value_delimiter = ',')]
+    pub domain: Option<Vec<String>>,
+
+    /// Exclude results from these domains (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    pub exclude_domain: Option<Vec<String>>,
+
+    /// Freshness filter: day, week, month, year
+    #[arg(short, long)]
+    pub freshness: Option<String>,
 }
 
 #[derive(Subcommand)]

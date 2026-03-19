@@ -1,6 +1,6 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::SearchResult;
+use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -51,6 +51,29 @@ struct BraveNewsResult {
     age: Option<String>,
 }
 
+/// Brave freshness: pd (day), pw (week), pm (month), py (year)
+fn map_freshness(f: &str) -> &str {
+    match f {
+        "day" => "pd",
+        "week" => "pw",
+        "month" => "pm",
+        "year" => "py",
+        other => other, // pass through if already in Brave format
+    }
+}
+
+/// Append site: operators for domain filtering
+fn augment_query(query: &str, opts: &SearchOpts) -> String {
+    let mut q = query.to_string();
+    for d in &opts.include_domains {
+        q = format!("{q} site:{d}");
+    }
+    for d in &opts.exclude_domains {
+        q = format!("{q} -site:{d}");
+    }
+    q
+}
+
 #[async_trait]
 impl super::Provider for Brave {
     fn name(&self) -> &'static str {
@@ -69,96 +92,114 @@ impl super::Provider for Brave {
         Duration::from_secs(10)
     }
 
-    async fn search(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
+    async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {
             return Err(SearchError::AuthMissing { provider: "brave" });
         }
 
-        let resp = self
-            .ctx
-            .client
-            .get("https://api.search.brave.com/res/v1/web/search")
-            .header("X-Subscription-Token", self.api_key())
-            .header("Accept", "application/json")
-            .query(&[("q", query), ("count", &count.to_string())])
-            .send()
-            .await?;
+        let client = &self.ctx.client;
+        let api_key = self.api_key();
+        let count_str = count.to_string();
+        let q = augment_query(query, opts);
+        let freshness = opts.freshness.as_deref().map(map_freshness);
 
-        if resp.status() == 429 {
-            return Err(SearchError::RateLimited { provider: "brave" });
-        }
-        if !resp.status().is_success() {
-            return Err(SearchError::Api {
-                provider: "brave",
-                code: "api_error",
-                message: format!("HTTP {}", resp.status()),
-            });
-        }
+        super::retry_request(|| async {
+            let mut req = client
+                .get("https://api.search.brave.com/res/v1/web/search")
+                .header("X-Subscription-Token", api_key)
+                .header("Accept", "application/json")
+                .query(&[("q", q.as_str()), ("count", &count_str)]);
 
-        let body: BraveResponse = resp.json().await?;
-        let results = body
-            .web
-            .map(|w| w.results)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| SearchResult {
-                title: r.title.unwrap_or_default(),
-                url: r.url.unwrap_or_default(),
-                snippet: r.description.unwrap_or_default(),
-                source: "brave".to_string(),
-                published: None,
-                image_url: None,
-                extra: None,
-            })
-            .collect();
+            if let Some(f) = freshness {
+                req = req.query(&[("freshness", f)]);
+            }
 
-        Ok(results)
+            let resp = req.send().await?;
+
+            if resp.status() == 429 {
+                return Err(SearchError::RateLimited { provider: "brave" });
+            }
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "brave",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
+
+            let body: BraveResponse = resp.json().await?;
+            let results = body
+                .web
+                .map(|w| w.results)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| SearchResult {
+                    title: r.title.unwrap_or_default(),
+                    url: r.url.unwrap_or_default(),
+                    snippet: r.description.unwrap_or_default(),
+                    source: "brave".to_string(),
+                    published: None,
+                    image_url: None,
+                    extra: None,
+                })
+                .collect();
+
+            Ok(results)
+        })
+        .await
     }
 
-    async fn search_news(
-        &self,
-        query: &str,
-        count: usize,
-    ) -> Result<Vec<SearchResult>, SearchError> {
+    async fn search_news(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {
             return Err(SearchError::AuthMissing { provider: "brave" });
         }
 
-        let resp = self
-            .ctx
-            .client
-            .get("https://api.search.brave.com/res/v1/news/search")
-            .header("X-Subscription-Token", self.api_key())
-            .header("Accept", "application/json")
-            .query(&[("q", query), ("count", &count.to_string())])
-            .send()
-            .await?;
+        let client = &self.ctx.client;
+        let api_key = self.api_key();
+        let count_str = count.to_string();
+        let q = augment_query(query, opts);
+        let freshness = opts.freshness.as_deref().map(map_freshness);
 
-        if !resp.status().is_success() {
-            return Err(SearchError::Api {
-                provider: "brave",
-                code: "api_error",
-                message: format!("HTTP {}", resp.status()),
-            });
-        }
+        super::retry_request(|| async {
+            let mut req = client
+                .get("https://api.search.brave.com/res/v1/news/search")
+                .header("X-Subscription-Token", api_key)
+                .header("Accept", "application/json")
+                .query(&[("q", q.as_str()), ("count", &count_str)]);
 
-        let body: BraveResponse = resp.json().await?;
-        let results = body
-            .news
-            .map(|n| n.results)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| SearchResult {
-                title: r.title.unwrap_or_default(),
-                url: r.url.unwrap_or_default(),
-                snippet: r.description.unwrap_or_default(),
-                source: "brave_news".to_string(),
-                published: r.age,
-                image_url: None,
-                extra: None,
-            })
-            .collect();
+            if let Some(f) = freshness {
+                req = req.query(&[("freshness", f)]);
+            }
 
-        Ok(results)
+            let resp = req.send().await?;
+
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "brave",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
+
+            let body: BraveResponse = resp.json().await?;
+            let results = body
+                .news
+                .map(|n| n.results)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| SearchResult {
+                    title: r.title.unwrap_or_default(),
+                    url: r.url.unwrap_or_default(),
+                    snippet: r.description.unwrap_or_default(),
+                    source: "brave_news".to_string(),
+                    published: r.age,
+                    image_url: None,
+                    extra: None,
+                })
+                .collect();
+
+            Ok(results)
+        })
+        .await
     }
 }

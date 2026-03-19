@@ -1,6 +1,6 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::SearchResult;
+use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
@@ -57,7 +57,7 @@ impl super::Provider for Firecrawl {
         Duration::from_secs(30)
     }
 
-    async fn search(&self, _query: &str, _count: usize) -> Result<Vec<SearchResult>, SearchError> {
+    async fn search(&self, _query: &str, _count: usize, _opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         Ok(vec![]) // Firecrawl is primarily for scraping, not searching
     }
 
@@ -65,6 +65,7 @@ impl super::Provider for Firecrawl {
         &self,
         _query: &str,
         _count: usize,
+        _opts: &SearchOpts,
     ) -> Result<Vec<SearchResult>, SearchError> {
         Ok(vec![])
     }
@@ -78,49 +79,54 @@ impl Firecrawl {
             });
         }
 
-        let resp = self
-            .ctx
-            .client
-            .post("https://api.firecrawl.dev/v1/scrape")
-            .header("Authorization", format!("Bearer {}", self.api_key()))
-            .header("Content-Type", "application/json")
-            .json(&json!({
-                "url": url,
-                "formats": ["markdown"]
-            }))
-            .send()
-            .await?;
+        let client = &self.ctx.client;
+        let auth = format!("Bearer {}", self.api_key());
+        let body = json!({
+            "url": url,
+            "formats": ["markdown"]
+        });
 
-        if resp.status() == 429 {
-            return Err(SearchError::RateLimited {
-                provider: "firecrawl",
-            });
-        }
-        if !resp.status().is_success() {
-            return Err(SearchError::Api {
-                provider: "firecrawl",
-                code: "api_error",
-                message: format!("HTTP {}", resp.status()),
-            });
-        }
+        super::retry_request(|| async {
+            let resp = client
+                .post("https://api.firecrawl.dev/v1/scrape")
+                .header("Authorization", &auth)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
 
-        let body: FirecrawlScrapeResponse = resp.json().await?;
-        if let Some(data) = body.data {
-            let meta = data.metadata.unwrap_or(FirecrawlMetadata {
-                title: None,
-                source_url: None,
-            });
-            Ok(vec![SearchResult {
-                title: meta.title.unwrap_or_default(),
-                url: meta.source_url.unwrap_or_else(|| url.to_string()),
-                snippet: data.markdown.unwrap_or_default(),
-                source: "firecrawl".to_string(),
-                published: None,
-                image_url: None,
-                extra: None,
-            }])
-        } else {
-            Ok(vec![])
-        }
+            if resp.status() == 429 {
+                return Err(SearchError::RateLimited {
+                    provider: "firecrawl",
+                });
+            }
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "firecrawl",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
+
+            let body: FirecrawlScrapeResponse = resp.json().await?;
+            if let Some(data) = body.data {
+                let meta = data.metadata.unwrap_or(FirecrawlMetadata {
+                    title: None,
+                    source_url: None,
+                });
+                Ok(vec![SearchResult {
+                    title: meta.title.unwrap_or_default(),
+                    url: meta.source_url.unwrap_or_else(|| url.to_string()),
+                    snippet: data.markdown.unwrap_or_default(),
+                    source: "firecrawl".to_string(),
+                    published: None,
+                    image_url: None,
+                    extra: None,
+                }])
+            } else {
+                Ok(vec![])
+            }
+        })
+        .await
     }
 }

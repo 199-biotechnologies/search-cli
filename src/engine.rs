@@ -2,7 +2,7 @@ use crate::classify::classify_intent;
 use crate::context::AppContext;
 use crate::errors::SearchError;
 use crate::providers::{self, Provider};
-use crate::types::{Mode, ResponseMetadata, SearchResponse, SearchResult};
+use crate::types::{Mode, ResponseMetadata, SearchOpts, SearchResponse, SearchResult};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,9 +12,10 @@ use tokio::time::timeout;
 /// Which providers to query for each mode
 fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
     match mode {
-        Mode::Auto | Mode::General => &["brave", "serper", "exa", "jina"],
-        Mode::News => &["brave", "serper"],
-        Mode::Academic | Mode::Deep => &["exa", "serper"],
+        Mode::Auto | Mode::General => &["brave", "serper", "exa", "jina", "tavily"],
+        Mode::News => &["brave", "serper", "tavily"],
+        Mode::Academic => &["exa", "serper", "tavily"],
+        Mode::Deep => &["exa", "serper", "tavily"],
         Mode::Scholar => &["serper"],
         Mode::Patents => &["serper"],
         Mode::People => &["exa"],
@@ -31,6 +32,7 @@ pub async fn execute_search(
     mode: Mode,
     count: usize,
     only_providers: &Option<Vec<String>>,
+    opts: &SearchOpts,
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
 
@@ -68,19 +70,20 @@ pub async fn execute_search(
         let c = count;
         let name = provider.name();
         let tout = provider.timeout();
+        let sopts = opts.clone();
         providers_queried.push(name.to_string());
 
         // Choose the right method based on mode
         match resolved_mode {
             Mode::News => {
                 set.spawn(async move {
-                    let result = timeout(tout, provider.search_news(&q, c)).await;
+                    let result = timeout(tout, provider.search_news(&q, c, &sopts)).await;
                     (name, result)
                 });
             }
             _ => {
                 set.spawn(async move {
-                    let result = timeout(tout, provider.search(&q, c)).await;
+                    let result = timeout(tout, provider.search(&q, c, &sopts)).await;
                     (name, result)
                 });
             }
@@ -118,8 +121,8 @@ pub async fn execute_search(
     let elapsed = start.elapsed();
 
     Ok(SearchResponse {
-        version: "1",
-        status: "success",
+        version: "1".into(),
+        status: "success".into(),
         query: query.to_string(),
         mode: resolved_mode.to_string(),
         results: all_results,
@@ -160,6 +163,7 @@ pub async fn execute_special(
     mode: Mode,
     count: usize,
     only_providers: &Option<Vec<String>>,
+    _opts: &SearchOpts,
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
     let all_providers = providers::build_providers(&ctx);
@@ -297,8 +301,8 @@ pub async fn execute_special(
     let result_count = results.len();
 
     Ok(SearchResponse {
-        version: "1",
-        status: "success",
+        version: "1".into(),
+        status: "success".into(),
         query: query.to_string(),
         mode: mode.to_string(),
         results,
@@ -319,6 +323,7 @@ pub async fn run(
     mode: Mode,
     count: usize,
     only_providers: &Option<Vec<String>>,
+    opts: &SearchOpts,
 ) -> Result<SearchResponse, SearchError> {
     let resolved_mode = if mode == Mode::Auto {
         classify_intent(query)
@@ -329,9 +334,9 @@ pub async fn run(
     let mut response = match resolved_mode {
         Mode::Scholar | Mode::Patents | Mode::Images | Mode::Places | Mode::People
         | Mode::Similar | Mode::Scrape | Mode::Extract => {
-            execute_special(ctx, query, resolved_mode, count, only_providers).await?
+            execute_special(ctx, query, resolved_mode, count, only_providers, opts).await?
         }
-        _ => execute_search(ctx, query, resolved_mode, count, only_providers).await?,
+        _ => execute_search(ctx, query, resolved_mode, count, only_providers, opts).await?,
     };
 
     response.metadata.result_count = response.results.len();

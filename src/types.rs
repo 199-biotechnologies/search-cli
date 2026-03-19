@@ -67,22 +67,30 @@ pub struct SearchResult {
     pub extra: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResponse {
-    pub version: &'static str,
-    pub status: &'static str,
+    pub version: String,
+    pub status: String,
     pub query: String,
     pub mode: String,
     pub results: Vec<SearchResult>,
     pub metadata: ResponseMetadata,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ResponseMetadata {
     pub elapsed_ms: u128,
     pub result_count: usize,
     pub providers_queried: Vec<String>,
     pub providers_failed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SearchOpts {
+    pub include_domains: Vec<String>,
+    pub exclude_domains: Vec<String>,
+    /// day, week, month, year
+    pub freshness: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -1,6 +1,6 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::SearchResult;
+use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -51,56 +51,62 @@ impl super::Provider for Jina {
         Duration::from_secs(15)
     }
 
-    async fn search(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
+    async fn search(&self, query: &str, count: usize, _opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {
             return Err(SearchError::AuthMissing { provider: "jina" });
         }
 
-        let resp = self
-            .ctx
-            .client
-            .get("https://s.jina.ai/")
-            .header("Authorization", format!("Bearer {}", self.api_key()))
-            .header("Accept", "application/json")
-            .header("X-Retain-Images", "none")
-            .query(&[("q", query), ("count", &count.to_string())])
-            .send()
-            .await?;
+        let client = &self.ctx.client;
+        let auth = format!("Bearer {}", self.api_key());
+        let count_str = count.to_string();
 
-        if resp.status() == 429 {
-            return Err(SearchError::RateLimited { provider: "jina" });
-        }
-        if !resp.status().is_success() {
-            return Err(SearchError::Api {
-                provider: "jina",
-                code: "api_error",
-                message: format!("HTTP {}", resp.status()),
-            });
-        }
+        super::retry_request(|| async {
+            let resp = client
+                .get("https://s.jina.ai/")
+                .header("Authorization", &auth)
+                .header("Accept", "application/json")
+                .header("X-Retain-Images", "none")
+                .query(&[("q", query), ("count", &count_str)])
+                .send()
+                .await?;
 
-        let body: JinaSearchResponse = resp.json().await?;
-        let results = body
-            .data
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| SearchResult {
-                title: r.title.unwrap_or_default(),
-                url: r.url.unwrap_or_default(),
-                snippet: r.description.or(r.content).unwrap_or_default(),
-                source: "jina".to_string(),
-                published: None,
-                image_url: None,
-                extra: None,
-            })
-            .collect();
+            if resp.status() == 429 {
+                return Err(SearchError::RateLimited { provider: "jina" });
+            }
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "jina",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
 
-        Ok(results)
+            let body: JinaSearchResponse = resp.json().await?;
+            let results = body
+                .data
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| SearchResult {
+                    title: r.title.unwrap_or_default(),
+                    url: r.url.unwrap_or_default(),
+                    snippet: r.description.or(r.content).unwrap_or_default(),
+                    source: "jina".to_string(),
+                    published: None,
+                    image_url: None,
+                    extra: None,
+                })
+                .collect();
+
+            Ok(results)
+        })
+        .await
     }
 
     async fn search_news(
         &self,
         _query: &str,
         _count: usize,
+        _opts: &SearchOpts,
     ) -> Result<Vec<SearchResult>, SearchError> {
         Ok(vec![]) // Jina doesn't have a dedicated news endpoint
     }
@@ -113,43 +119,47 @@ impl Jina {
         }
 
         let reader_url = format!("https://r.jina.ai/{url}");
-        let resp = self
-            .ctx
-            .client
-            .get(&reader_url)
-            .header("Authorization", format!("Bearer {}", self.api_key()))
-            .header("Accept", "application/json")
-            .header("X-Retain-Images", "none")
-            .send()
-            .await?;
+        let client = &self.ctx.client;
+        let auth = format!("Bearer {}", self.api_key());
 
-        if !resp.status().is_success() {
-            return Err(SearchError::Api {
-                provider: "jina",
-                code: "api_error",
-                message: format!("HTTP {}", resp.status()),
-            });
-        }
+        super::retry_request(|| async {
+            let resp = client
+                .get(&reader_url)
+                .header("Authorization", &auth)
+                .header("Accept", "application/json")
+                .header("X-Retain-Images", "none")
+                .send()
+                .await?;
 
-        let body: serde_json::Value = resp.json().await?;
-        let data = body.get("data");
-        let title = data
-            .and_then(|d| d.get("title"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        let content = data
-            .and_then(|d| d.get("content"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "jina",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
 
-        Ok(vec![SearchResult {
-            title: title.to_string(),
-            url: url.to_string(),
-            snippet: content.to_string(),
-            source: "jina_reader".to_string(),
-            published: None,
-            image_url: None,
-            extra: None,
-        }])
+            let body: serde_json::Value = resp.json().await?;
+            let data = body.get("data");
+            let title = data
+                .and_then(|d| d.get("title"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let content = data
+                .and_then(|d| d.get("content"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+
+            Ok(vec![SearchResult {
+                title: title.to_string(),
+                url: url.to_string(),
+                snippet: content.to_string(),
+                source: "jina_reader".to_string(),
+                published: None,
+                image_url: None,
+                extra: None,
+            }])
+        })
+        .await
     }
 }

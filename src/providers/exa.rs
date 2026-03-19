@@ -1,6 +1,6 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::SearchResult;
+use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
@@ -20,38 +20,38 @@ impl Exa {
         &self.ctx.config.keys.exa
     }
 
-    async fn post_api(
-        &self,
-        path: &str,
-        body: serde_json::Value,
-    ) -> Result<ExaResponse, SearchError> {
+    async fn post_api(&self, path: &str, body: serde_json::Value) -> Result<ExaResponse, SearchError> {
         if self.api_key().is_empty() {
             return Err(SearchError::AuthMissing { provider: "exa" });
         }
 
         let url = format!("https://api.exa.ai/{path}");
-        let resp = self
-            .ctx
-            .client
-            .post(&url)
-            .header("x-api-key", self.api_key())
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+        let client = &self.ctx.client;
+        let api_key = self.api_key();
 
-        if resp.status() == 429 {
-            return Err(SearchError::RateLimited { provider: "exa" });
-        }
-        if !resp.status().is_success() {
-            return Err(SearchError::Api {
-                provider: "exa",
-                code: "api_error",
-                message: format!("HTTP {}", resp.status()),
-            });
-        }
+        super::retry_request(|| async {
+            let resp = client
+                .post(&url)
+                .header("x-api-key", api_key)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?;
 
-        Ok(resp.json().await?)
+            if resp.status() == 429 {
+                return Err(SearchError::RateLimited { provider: "exa" });
+            }
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "exa",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
+
+            Ok(resp.json().await?)
+        })
+        .await
     }
 }
 
@@ -85,79 +85,56 @@ fn to_results(exa: ExaResponse, source: &str) -> Vec<SearchResult> {
         .collect()
 }
 
+fn build_search_body(query: &str, count: usize, opts: &SearchOpts) -> serde_json::Value {
+    let mut body = json!({
+        "query": query,
+        "numResults": count,
+        "type": "auto",
+        "contents": { "text": true }
+    });
+    // Exa supports includeDomains / excludeDomains natively
+    if !opts.include_domains.is_empty() {
+        body["includeDomains"] = json!(opts.include_domains);
+    }
+    if !opts.exclude_domains.is_empty() {
+        body["excludeDomains"] = json!(opts.exclude_domains);
+    }
+    body
+}
+
 #[async_trait]
 impl super::Provider for Exa {
-    fn name(&self) -> &'static str {
-        "exa"
-    }
+    fn name(&self) -> &'static str { "exa" }
+    fn capabilities(&self) -> &[&'static str] { &["general", "academic", "people", "similar", "deep"] }
+    fn is_configured(&self) -> bool { !self.api_key().is_empty() }
+    fn timeout(&self) -> Duration { Duration::from_secs(15) }
 
-    fn capabilities(&self) -> &[&'static str] {
-        &["general", "academic", "people", "similar", "deep"]
-    }
-
-    fn is_configured(&self) -> bool {
-        !self.api_key().is_empty()
-    }
-
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(15)
-    }
-
-    async fn search(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let body = json!({
-            "query": query,
-            "numResults": count,
-            "type": "auto",
-            "contents": { "text": true }
-        });
+    async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
+        let body = build_search_body(query, count, opts);
         let resp = self.post_api("search", body).await?;
         Ok(to_results(resp, "exa"))
     }
 
-    async fn search_news(
-        &self,
-        query: &str,
-        count: usize,
-    ) -> Result<Vec<SearchResult>, SearchError> {
-        let body = json!({
-            "query": query,
-            "numResults": count,
-            "type": "auto",
-            "category": "news",
-            "contents": { "text": true }
-        });
+    async fn search_news(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
+        let mut body = build_search_body(query, count, opts);
+        body["category"] = json!("news");
         let resp = self.post_api("search", body).await?;
         Ok(to_results(resp, "exa_news"))
     }
 }
 
 impl Exa {
-    pub async fn search_people(
-        &self,
-        query: &str,
-        count: usize,
-    ) -> Result<Vec<SearchResult>, SearchError> {
+    pub async fn search_people(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
         let body = json!({
-            "query": query,
-            "numResults": count,
-            "type": "auto",
-            "category": "linkedin profile",
-            "contents": { "text": true }
+            "query": query, "numResults": count, "type": "auto",
+            "category": "linkedin profile", "contents": { "text": true }
         });
         let resp = self.post_api("search", body).await?;
         Ok(to_results(resp, "exa_people"))
     }
 
-    pub async fn find_similar(
-        &self,
-        url: &str,
-        count: usize,
-    ) -> Result<Vec<SearchResult>, SearchError> {
-        let body = json!({
-            "url": url,
-            "numResults": count,
-            "contents": { "text": true }
-        });
+    pub async fn find_similar(&self, url: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
+        let body = json!({ "url": url, "numResults": count, "contents": { "text": true } });
         let resp = self.post_api("findSimilar", body).await?;
         Ok(to_results(resp, "exa_similar"))
     }

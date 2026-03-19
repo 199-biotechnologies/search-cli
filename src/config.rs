@@ -24,6 +24,8 @@ pub struct ApiKeys {
     pub jina: String,
     #[serde(default)]
     pub firecrawl: String,
+    #[serde(default)]
+    pub tavily: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,7 @@ impl Default for AppConfig {
                 exa: String::new(),
                 jina: String::new(),
                 firecrawl: String::new(),
+                tavily: String::new(),
             },
             settings: Settings {
                 timeout: default_timeout(),
@@ -76,12 +79,12 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
-pub fn load_config() -> Result<AppConfig, figment::Error> {
-    Figment::new()
+pub fn load_config() -> Result<AppConfig, Box<figment::Error>> {
+    Ok(Figment::new()
         .merge(Serialized::defaults(AppConfig::default()))
         .merge(Toml::file(config_path()))
         .merge(Env::prefixed("SEARCH_").split("_"))
-        .extract()
+        .extract()?)
 }
 
 pub fn mask_key(key: &str) -> String {
@@ -114,6 +117,7 @@ pub fn config_show(config: &AppConfig) {
         ("exa", &config.keys.exa),
         ("jina", &config.keys.jina),
         ("firecrawl", &config.keys.firecrawl),
+        ("tavily", &config.keys.tavily),
     ];
 
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
@@ -194,6 +198,7 @@ pub fn config_check(config: &AppConfig) {
         ("exa", &config.keys.exa, "Semantic search, People, Similar pages"),
         ("jina", &config.keys.jina, "Web search + URL reader"),
         ("firecrawl", &config.keys.firecrawl, "Web scraping + extraction"),
+        ("tavily", &config.keys.tavily, "General, News, Academic, Deep search"),
     ];
 
     if c {

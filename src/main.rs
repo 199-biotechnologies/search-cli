@@ -1,3 +1,4 @@
+mod cache;
 mod classify;
 mod cli;
 mod config;
@@ -47,6 +48,17 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
     // Handle bare `search "query"` without subcommand
     let command = if let Some(cmd) = cli.command {
         cmd
+    } else if cli.last {
+        // --last with no subcommand: synthesize a Search command (query is ignored)
+        Commands::Search(cli::SearchArgs {
+            query: String::new(),
+            mode: types::Mode::Auto,
+            count: None,
+            providers: None,
+            domain: None,
+            exclude_domain: None,
+            freshness: None,
+        })
     } else if !cli.query_words.is_empty() {
         let query = cli.query_words.join(" ");
         Commands::Search(cli::SearchArgs {
@@ -54,6 +66,9 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
             mode: types::Mode::Auto,
             count: None,
             providers: None,
+            domain: None,
+            exclude_domain: None,
+            freshness: None,
         })
     } else {
         // No command and no query — show help
@@ -65,9 +80,29 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
 
     match command {
         Commands::Search(args) => {
+            // --last: replay cached result instead of searching
+            if cli.last {
+                if let Some(cached) = cache::load_last() {
+                    match *format {
+                        OutputFormat::Json => output::json::render(&cached),
+                        OutputFormat::Table => output::table::render(&cached),
+                    }
+                    return Ok(0);
+                } else {
+                    eprintln!("No cached results found. Run a search first.");
+                    return Ok(1);
+                }
+            }
+
             let config = load_config().map_err(|e| errors::SearchError::Config(e.to_string()))?;
             let count = args.count.unwrap_or(config.settings.count);
             let ctx = Arc::new(AppContext::new(config));
+
+            let opts = types::SearchOpts {
+                include_domains: args.domain.unwrap_or_default(),
+                exclude_domains: args.exclude_domain.unwrap_or_default(),
+                freshness: args.freshness,
+            };
 
             // Show spinner for human output
             let spinner = if matches!(*format, OutputFormat::Table) && !cli.quiet {
@@ -98,13 +133,15 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
             };
 
             let response =
-                engine::run(ctx, &args.query, args.mode, count, &args.providers).await;
+                engine::run(ctx, &args.query, args.mode, count, &args.providers, &opts).await;
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
             }
 
             let response = response?;
+
+            cache::save_last(&response);
 
             match *format {
                 OutputFormat::Json => output::json::render(&response),
