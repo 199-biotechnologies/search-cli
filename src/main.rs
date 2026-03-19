@@ -104,6 +104,21 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
                 freshness: args.freshness,
             };
 
+            // Check query cache (5min TTL) — skip if domain/freshness filters are set
+            let mode_str = args.mode.to_string();
+            if opts.include_domains.is_empty()
+                && opts.exclude_domains.is_empty()
+                && opts.freshness.is_none()
+            {
+                if let Some(cached) = cache::load_query(&args.query, &mode_str) {
+                    match *format {
+                        OutputFormat::Json => output::json::render(&cached),
+                        OutputFormat::Table => output::table::render(&cached),
+                    }
+                    return Ok(0);
+                }
+            }
+
             // Show spinner for human output
             let spinner = if matches!(*format, OutputFormat::Table) && !cli.quiet {
                 let sp = indicatif::ProgressBar::new_spinner();
@@ -142,6 +157,7 @@ async fn run(cli: Cli, format: &OutputFormat) -> Result<i32, errors::SearchError
             let response = response?;
 
             cache::save_last(&response);
+            cache::save_query(&args.query, &mode_str, &response);
 
             match *format {
                 OutputFormat::Json => output::json::render(&response),

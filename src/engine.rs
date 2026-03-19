@@ -92,11 +92,23 @@ pub async fn execute_search(
 
     let mut all_results = Vec::new();
     let mut providers_failed = Vec::new();
+    let mut unique_urls = HashSet::new();
 
+    // Early return: once we have enough unique results, abort remaining providers
     while let Some(join_result) = set.join_next().await {
         match join_result {
             Ok((_name, Ok(Ok(items)))) => {
-                all_results.extend(items);
+                for item in items {
+                    let normalized = normalize_url(&item.url);
+                    if unique_urls.insert(normalized) {
+                        all_results.push(item);
+                    }
+                }
+                // If we already have enough results, cancel slow providers
+                if all_results.len() >= count {
+                    set.abort_all();
+                    break;
+                }
             }
             Ok((name, Ok(Err(e)))) => {
                 tracing::warn!("{name}: {e}");
@@ -107,15 +119,15 @@ pub async fn execute_search(
                 providers_failed.push(name.to_string());
             }
             Err(e) => {
-                tracing::error!("join error: {e}");
+                // JoinError from abort — not a real failure
+                if !e.is_cancelled() {
+                    tracing::error!("join error: {e}");
+                }
             }
         }
     }
 
-    // Dedup by URL
-    dedup_results(&mut all_results);
-
-    // Trim to requested count
+    // Trim to exact requested count
     all_results.truncate(count);
 
     let elapsed = start.elapsed();
@@ -133,14 +145,6 @@ pub async fn execute_search(
             providers_failed,
         },
     })
-}
-
-fn dedup_results(results: &mut Vec<SearchResult>) {
-    let mut seen = HashSet::new();
-    results.retain(|r| {
-        let normalized = normalize_url(&r.url);
-        seen.insert(normalized)
-    });
 }
 
 fn normalize_url(url: &str) -> String {

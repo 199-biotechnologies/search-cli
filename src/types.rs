@@ -67,7 +67,7 @@ pub struct SearchResult {
     pub extra: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResponse {
     pub version: String,
     pub status: String,
@@ -77,7 +77,7 @@ pub struct SearchResponse {
     pub metadata: ResponseMetadata,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseMetadata {
     pub elapsed_ms: u128,
     pub result_count: usize,
