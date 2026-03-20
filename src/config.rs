@@ -30,6 +30,8 @@ pub struct ApiKeys {
     pub serpapi: String,
     #[serde(default)]
     pub perplexity: String,
+    #[serde(default)]
+    pub browserless: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +61,7 @@ impl Default for AppConfig {
                 tavily: String::new(),
                 serpapi: String::new(),
                 perplexity: String::new(),
+                browserless: String::new(),
             },
             settings: Settings {
                 timeout: default_timeout(),
@@ -126,6 +129,7 @@ pub fn config_show(config: &AppConfig) {
         ("tavily", &config.keys.tavily),
         ("serpapi", &config.keys.serpapi),
         ("perplexity", &config.keys.perplexity),
+        ("browserless", &config.keys.browserless),
     ];
 
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
@@ -209,6 +213,7 @@ pub fn config_check(config: &AppConfig) {
         ("tavily", &config.keys.tavily, "General, News, Academic, Deep search"),
         ("serpapi", &config.keys.serpapi, "80+ engines: Google, Bing, YouTube, Baidu, Scholar"),
         ("perplexity", &config.keys.perplexity, "AI-powered answers with citations (Perplexity Sonar)"),
+        ("browserless", &config.keys.browserless, "Cloud browser for Cloudflare/JS-heavy pages"),
     ];
 
     if c {

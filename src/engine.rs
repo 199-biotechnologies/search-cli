@@ -21,7 +21,7 @@ fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
         Mode::People => &["exa"],
         Mode::Images => &["serper"],
         Mode::Places => &["serper"],
-        Mode::Extract | Mode::Scrape => &["stealth", "jina", "firecrawl"],
+        Mode::Extract | Mode::Scrape => &["stealth", "jina", "firecrawl", "browserless"],
         Mode::Similar => &["exa"],
     }
 }
@@ -366,6 +366,21 @@ pub async fn execute_special(
                             tracing::warn!("firecrawl: {e}");
                         }
                         Err(_) => providers_failed.push("firecrawl".to_string()),
+                    }
+                }
+            }
+            // Last resort: Browserless cloud browser (handles Cloudflare, JS rendering)
+            if results.is_empty() {
+                let bl = providers::browserless::Browserless::new(ctx.clone());
+                if bl.is_configured() && provider_allowed("browserless", only_providers) {
+                    providers_queried.push("browserless".to_string());
+                    match timeout(Duration::from_secs(30), bl.scrape_url(query)).await {
+                        Ok(Ok(items)) => results.extend(items),
+                        Ok(Err(e)) => {
+                            providers_failed.push("browserless".to_string());
+                            tracing::warn!("browserless: {e}");
+                        }
+                        Err(_) => providers_failed.push("browserless".to_string()),
                     }
                 }
             }

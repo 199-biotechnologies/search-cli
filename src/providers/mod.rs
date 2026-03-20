@@ -1,4 +1,5 @@
 pub mod brave;
+pub mod browserless;
 pub mod exa;
 pub mod firecrawl;
 pub mod jina;
@@ -54,6 +55,7 @@ pub fn build_providers(ctx: &Arc<AppContext>) -> Vec<Box<dyn Provider>> {
         Box::new(stealth::Stealth::new(ctx.clone())),
         Box::new(firecrawl::Firecrawl::new(ctx.clone())),
         Box::new(tavily::Tavily::new(ctx.clone())),
+        Box::new(browserless::Browserless::new(ctx.clone())),
         Box::new(perplexity::Perplexity::new(ctx.clone())),
         Box::new(serpapi::SerpApi::new(ctx.clone())),
     ]
