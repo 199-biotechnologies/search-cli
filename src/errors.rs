@@ -26,6 +26,9 @@ pub enum SearchError {
     Http(#[from] reqwest::Error),
 
     #[error(transparent)]
+    Rquest(#[from] rquest::Error),
+
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
 
     #[error(transparent)]
@@ -38,7 +41,7 @@ impl SearchError {
             Self::Config(_) | Self::NoProviders(_) => 2,
             Self::AuthMissing { .. } => 3,
             Self::RateLimited { .. } => 4,
-            Self::Api { .. } | Self::Http(_) => 1,
+            Self::Api { .. } | Self::Http(_) | Self::Rquest(_) => 1,
             Self::Json(_) | Self::Io(_) => 1,
         }
     }
@@ -50,7 +53,7 @@ impl SearchError {
             Self::RateLimited { .. } => "rate_limited",
             Self::Config(_) => "config_error",
             Self::NoProviders(_) => "no_providers",
-            Self::Http(_) => "http_error",
+            Self::Http(_) | Self::Rquest(_) => "http_error",
             Self::Json(_) => "json_error",
             Self::Io(_) => "io_error",
         }

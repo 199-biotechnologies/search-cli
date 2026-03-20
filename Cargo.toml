@@ -31,6 +31,10 @@ backon = "1"
 url = "2.5.8"
 mimalloc = "0.1.48"
 simd-json = "0.17.0"
+rquest = { version = "5", features = ["json", "cookies"] }
+rquest-util = "2"
+tl = "0.7"
+readability = "0.3"
 
 [dev-dependencies]
 assert_cmd = "2"

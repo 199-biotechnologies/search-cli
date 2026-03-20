@@ -21,7 +21,7 @@ fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
         Mode::People => &["exa"],
         Mode::Images => &["serper"],
         Mode::Places => &["serper"],
-        Mode::Extract | Mode::Scrape => &["jina", "firecrawl"],
+        Mode::Extract | Mode::Scrape => &["stealth", "jina", "firecrawl"],
         Mode::Similar => &["exa"],
     }
 }
@@ -128,7 +128,7 @@ pub async fn execute_search(
 
     // Process speculative results first (they had a head start)
     while let Some(res) = speculative_set.join_next().await {
-        if let Ok((name, Ok(items))) = res {
+        if let Ok((_name, Ok(items))) = res {
             for item in items {
                 if unique_urls.insert(normalize_url(&item.url)) {
                     all_results.push(item);
@@ -327,17 +327,32 @@ pub async fn execute_special(
             }
         }
         Mode::Scrape | Mode::Extract => {
-            // Try Jina reader first, then Firecrawl
-            let jina = providers::jina::Jina::new(ctx.clone());
-            if jina.is_configured() && provider_allowed("jina", only_providers) {
-                providers_queried.push("jina".to_string());
-                match timeout(Duration::from_secs(30), jina.read_url(query)).await {
+            // Try Stealth (local) first, then Jina reader, then Firecrawl
+            let stealth = providers::stealth::Stealth::new(ctx.clone());
+            if provider_allowed("stealth", only_providers) {
+                providers_queried.push("stealth".to_string());
+                match timeout(Duration::from_secs(30), stealth.scrape_url(query)).await {
                     Ok(Ok(items)) => results.extend(items),
                     Ok(Err(e)) => {
-                        providers_failed.push("jina".to_string());
-                        tracing::warn!("jina reader: {e}");
+                        providers_failed.push("stealth".to_string());
+                        tracing::warn!("stealth: {e}");
                     }
-                    Err(_) => providers_failed.push("jina".to_string()),
+                    Err(_) => providers_failed.push("stealth".to_string()),
+                }
+            }
+
+            if results.is_empty() {
+                let jina = providers::jina::Jina::new(ctx.clone());
+                if jina.is_configured() && provider_allowed("jina", only_providers) {
+                    providers_queried.push("jina".to_string());
+                    match timeout(Duration::from_secs(30), jina.read_url(query)).await {
+                        Ok(Ok(items)) => results.extend(items),
+                        Ok(Err(e)) => {
+                            providers_failed.push("jina".to_string());
+                            tracing::warn!("jina reader: {e}");
+                        }
+                        Err(_) => providers_failed.push("jina".to_string()),
+                    }
                 }
             }
             if results.is_empty() {
