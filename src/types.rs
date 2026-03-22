@@ -30,6 +30,8 @@ pub enum Mode {
     Images,
     /// Local businesses and places (Serper)
     Places,
+    /// X/Twitter social search (xAI Grok)
+    Social,
 }
 
 impl fmt::Display for Mode {
@@ -48,6 +50,7 @@ impl fmt::Display for Mode {
             Mode::Patents => "patents",
             Mode::Images => "images",
             Mode::Places => "places",
+            Mode::Social => "social",
         };
         write!(f, "{s}")
     }

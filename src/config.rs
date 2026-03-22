@@ -32,6 +32,8 @@ pub struct ApiKeys {
     pub perplexity: String,
     #[serde(default)]
     pub browserless: String,
+    #[serde(default)]
+    pub xai: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +64,7 @@ impl Default for AppConfig {
                 serpapi: String::new(),
                 perplexity: String::new(),
                 browserless: String::new(),
+                xai: String::new(),
             },
             settings: Settings {
                 timeout: default_timeout(),
@@ -130,6 +133,7 @@ pub fn config_show(config: &AppConfig) {
         ("serpapi", &config.keys.serpapi),
         ("perplexity", &config.keys.perplexity),
         ("browserless", &config.keys.browserless),
+        ("xai", &config.keys.xai),
     ];
 
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
@@ -214,6 +218,7 @@ pub fn config_check(config: &AppConfig) {
         ("serpapi", &config.keys.serpapi, "80+ engines: Google, Bing, YouTube, Baidu, Scholar"),
         ("perplexity", &config.keys.perplexity, "AI-powered answers with citations (Perplexity Sonar)"),
         ("browserless", &config.keys.browserless, "Cloud browser for Cloudflare/JS-heavy pages"),
+        ("xai", &config.keys.xai, "X/Twitter social search via xAI Grok"),
     ];
 
     if c {

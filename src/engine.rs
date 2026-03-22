@@ -23,6 +23,7 @@ fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
         Mode::Places => &["serper"],
         Mode::Extract | Mode::Scrape => &["stealth", "jina", "firecrawl", "browserless"],
         Mode::Similar => &["exa"],
+        Mode::Social => &["xai"],
     }
 }
 
@@ -326,6 +327,20 @@ pub async fn execute_special(
                 }
             }
         }
+        Mode::Social => {
+            let xai = providers::xai::Xai::new(ctx.clone());
+            if xai.is_configured() && provider_allowed("xai", only_providers) {
+                providers_queried.push("xai".to_string());
+                match timeout(Duration::from_secs(60), xai.search(query, count, _opts)).await {
+                    Ok(Ok(items)) => results.extend(items),
+                    Ok(Err(e)) => {
+                        providers_failed.push("xai".to_string());
+                        tracing::warn!("xai: {e}");
+                    }
+                    Err(_) => providers_failed.push("xai".to_string()),
+                }
+            }
+        }
         Mode::Scrape | Mode::Extract => {
             // Try Stealth (local) first, then Jina reader, then Firecrawl
             let stealth = providers::stealth::Stealth::new(ctx.clone());
@@ -428,7 +443,7 @@ pub async fn run(
 
     let mut response = match resolved_mode {
         Mode::Scholar | Mode::Patents | Mode::Images | Mode::Places | Mode::People
-        | Mode::Similar | Mode::Scrape | Mode::Extract => {
+        | Mode::Similar | Mode::Scrape | Mode::Extract | Mode::Social => {
             execute_special(ctx, query, resolved_mode, count, only_providers, opts).await?
         }
         _ => execute_search(ctx, query, resolved_mode, count, only_providers, opts).await?,

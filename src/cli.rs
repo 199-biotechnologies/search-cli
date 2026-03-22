@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
     name = "search",
     version,
     about = "Agent-friendly multi-provider search CLI",
-    long_about = "Aggregates 5 search APIs (Brave, Serper, Exa, Jina, Firecrawl) with 13 search modes.\n\
+    long_about = "Aggregates 11 search providers with 14 search modes.\n\
         Auto-detects intent from your query and routes to the best providers.\n\
         Outputs colored tables for humans, JSON when piped to other tools.\n\n\
         PROVIDERS:\n  \
@@ -14,12 +14,19 @@ use clap::{Parser, Subcommand};
           serper     Google SERP: web, news, scholar, patents, images, places\n  \
           exa        Neural/semantic search, LinkedIn people, find-similar\n  \
           jina       Fast web search + URL-to-markdown reader\n  \
-          firecrawl  JS-rendered page scraping + structured extraction\n\n\
+          firecrawl  JS-rendered page scraping + structured extraction\n  \
+          tavily     General, news, academic, deep search\n  \
+          serpapi    80+ engines: Google, Bing, YouTube, Baidu, Scholar\n  \
+          perplexity AI-powered answers with citations (Sonar)\n  \
+          browserless Cloud browser for Cloudflare/JS-heavy pages\n  \
+          stealth    Anti-bot stealth scraper\n  \
+          xai        X/Twitter social search via xAI Grok\n\n\
         EXAMPLES:\n  \
           search \"rust error handling\"                    # auto-detect mode\n  \
           search search -q \"CRISPR\" -m academic           # academic papers\n  \
           search search -q \"CEO of Stripe\" -m people      # LinkedIn profiles via Exa\n  \
           search search -q \"AI news\" -m news              # breaking news\n  \
+          search search -q \"trending on twitter\" -m social # X/Twitter search\n  \
           search search -q \"query\" -p exa                 # force Exa only\n  \
           search search -q \"query\" -p exa,brave           # only Exa + Brave\n  \
           search \"query\" --json | jq '.results[].url'     # pipe JSON to jq"
@@ -84,7 +91,7 @@ pub struct SearchArgs {
     #[arg(short, long)]
     pub count: Option<usize>,
 
-    /// Use only specific providers (comma-separated: brave,exa,serper,jina,firecrawl,tavily)
+    /// Use only specific providers (comma-separated: brave,exa,serper,jina,firecrawl,tavily,xai)
     #[arg(short, long, value_delimiter = ',')]
     pub providers: Option<Vec<String>>,
 

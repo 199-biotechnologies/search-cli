@@ -9,6 +9,11 @@ serper = ""
 exa = ""
 jina = ""
 firecrawl = ""
+tavily = ""
+serpapi = ""
+perplexity = ""
+browserless = ""
+xai = ""
 
 [settings]
 timeout = 10

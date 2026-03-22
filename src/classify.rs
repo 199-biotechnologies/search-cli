@@ -2,6 +2,11 @@ use crate::types::Mode;
 use regex::Regex;
 use std::sync::OnceLock;
 
+fn social_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)(\btweet\b|\btweets\b|\bon twitter\b|\bon x\b|x\.com|twitter\.com|\btrending on\b|what.*\bsaying\b|@\w{1,15}\b)").unwrap())
+}
+
 fn news_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?i)\b(latest|breaking|news|today|yesterday|this week|headlines|update|announced)\b").unwrap())
@@ -49,6 +54,7 @@ fn places_re() -> &'static Regex {
 
 pub fn classify_intent(query: &str) -> Mode {
     let checks: &[(Mode, &dyn Fn() -> &'static Regex)] = &[
+        (Mode::Social, &social_re),
         (Mode::News, &news_re),
         (Mode::Academic, &academic_re),
         (Mode::Scholar, &scholar_re),

@@ -34,7 +34,7 @@ fn test_help_output() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Aggregates 5 search APIs"))
+        .stdout(predicate::str::contains("Aggregates 11 search providers"))
         .stdout(predicate::str::contains("brave"))
         .stdout(predicate::str::contains("serper"))
         .stdout(predicate::str::contains("exa"));
