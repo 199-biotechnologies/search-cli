@@ -5,6 +5,7 @@ mod config;
 mod context;
 mod engine;
 mod errors;
+mod logging;
 mod output;
 mod providers;
 mod types;
@@ -196,6 +197,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
 
             cache::save_last(&response);
             cache::save_query(&args.query, &mode_str, &response);
+            logging::log_search(&response);
 
             match *format {
                 OutputFormat::Json => output::json::render(&response),
@@ -231,7 +233,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 "name": "search",
                 "version": env!("CARGO_PKG_VERSION"),
                 "commands": ["search", "config show", "config set", "config check", "agent-info", "providers", "update"],
-                "modes": ["auto", "general", "news", "academic", "people", "deep", "extract", "similar", "scrape", "scholar", "patents", "images", "places"],
+                "modes": ["auto", "general", "news", "academic", "people", "deep", "extract", "similar", "scrape", "scholar", "patents", "images", "places", "social"],
                 "providers": providers_info,
                 "env_prefix": "SEARCH_",
                 "config_path": config::config_path().to_string_lossy(),
