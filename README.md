@@ -129,7 +129,7 @@ search "query" 2>/dev/null             # Suppress diagnostics
 | `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity |
 | `academic` | Research papers, studies | Exa + Serper + Tavily + Perplexity |
 | `people` | LinkedIn profiles, bios | Exa |
-| `deep` | Maximum coverage | Exa + Serper + Tavily + Perplexity |
+| `deep` | Maximum coverage | Brave (LLM Context) + Exa + Serper + Tavily + Perplexity |
 | `scholar` | Google Scholar | Serper + SerpApi |
 | `patents` | Patent search | Serper |
 | `images` | Image search | Serper |
@@ -143,7 +143,7 @@ search "query" 2>/dev/null             # Suppress diagnostics
 
 | Provider | Strength | Best for |
 |----------|----------|----------|
-| **Brave** | Independent 35B-page index, not Google | Web search, news, privacy-focused results |
+| **Brave** | Independent 35B-page index + LLM Context API | Web search, news, RAG-ready content chunks |
 | **Serper** | Raw Google SERP + specialist endpoints | Scholar, patents, images, places, fact-checking |
 | **Exa** | Neural/semantic search, category filters | Research papers, LinkedIn people, finding similar sites |
 | **Jina** | Fast URL-to-markdown, 500 RPM free tier | Reading article content, quick extraction |
