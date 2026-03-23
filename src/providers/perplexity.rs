@@ -66,13 +66,18 @@ impl Perplexity {
             body["search_recency_filter"] = json!(rf);
         }
 
-        let client = &self.ctx.client;
+        // Perplexity needs a longer timeout than the global 10s client
+        let pplx_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(45))
+            .build()
+            .unwrap_or_else(|_| self.ctx.client.clone());
         let key = self.api_key().to_string();
         let resp = super::retry_request(|| {
             let body = body.clone();
             let key = key.clone();
+            let pplx_client = pplx_client.clone();
             async move {
-                let r = client
+                let r = pplx_client
                     .post("https://api.perplexity.ai/chat/completions")
                     .header("Authorization", format!("Bearer {key}"))
                     .json(&body)

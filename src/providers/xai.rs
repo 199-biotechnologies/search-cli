@@ -57,11 +57,19 @@ impl Xai {
         let client = &self.ctx.client;
         let key = api_key;
 
+        // xAI needs its own client with a longer timeout — the global client
+        // has a 10s timeout which is too short for LLM inference + tool use
+        let xai_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(90))
+            .build()
+            .unwrap_or_else(|_| client.clone());
+
         super::retry_request(|| {
             let body = body.clone();
             let key = key.clone();
+            let xai_client = xai_client.clone();
             async move {
-                let resp = client
+                let resp = xai_client
                     .post("https://api.x.ai/v1/responses")
                     .header("Authorization", format!("Bearer {key}"))
                     .header("Content-Type", "application/json")
@@ -195,6 +203,14 @@ struct XaiContent {
     content_type: Option<String>,
     text: Option<String>,
     url: Option<String>,
+    annotations: Option<Vec<XaiAnnotation>>,
+}
+
+#[derive(Deserialize)]
+struct XaiAnnotation {
+    #[serde(rename = "type")]
+    annotation_type: Option<String>,
+    url: Option<String>,
 }
 
 fn extract_text(resp: &XaiResponse) -> String {
@@ -221,19 +237,29 @@ fn extract_text(resp: &XaiResponse) -> String {
 
 fn extract_citations(resp: &XaiResponse) -> Vec<String> {
     let mut urls = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     if let Some(output) = &resp.output {
         for item in output {
             if let Some(content) = &item.content {
                 for c in content {
-                    if c.content_type.as_deref() == Some("cite") || c.content_type.as_deref() == Some("url") {
-                        if let Some(url) = &c.url {
-                            urls.push(url.clone());
+                    // Extract from url_citation annotations (primary method)
+                    if let Some(annotations) = &c.annotations {
+                        for ann in annotations {
+                            if ann.annotation_type.as_deref() == Some("url_citation") {
+                                if let Some(url) = &ann.url {
+                                    if seen.insert(url.clone()) {
+                                        urls.push(url.clone());
+                                    }
+                                }
+                            }
                         }
                     }
-                    // Also check for URLs in text that look like x.com links
-                    if let Some(text) = &c.text {
-                        if text.starts_with("https://x.com/") || text.starts_with("https://twitter.com/") {
-                            urls.push(text.clone());
+                    // Fallback: check for cite/url content types
+                    if c.content_type.as_deref() == Some("cite") || c.content_type.as_deref() == Some("url") {
+                        if let Some(url) = &c.url {
+                            if seen.insert(url.clone()) {
+                                urls.push(url.clone());
+                            }
                         }
                     }
                 }

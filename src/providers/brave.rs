@@ -3,6 +3,7 @@ use crate::errors::SearchError;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -82,7 +83,7 @@ impl super::Provider for Brave {
     }
 
     fn capabilities(&self) -> &[&'static str] {
-        &["general", "news"]
+        &["general", "news", "deep"]
     }
 
     fn is_configured(&self) -> bool {
@@ -221,6 +222,82 @@ impl super::Provider for Brave {
                     extra: None,
                 })
                 .collect();
+
+            Ok(results)
+        })
+        .await
+    }
+}
+
+impl Brave {
+    /// LLM Context API — returns pre-extracted, relevance-scored content for RAG/grounding
+    pub async fn search_llm_context(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
+        if self.api_key().is_empty() {
+            return Err(SearchError::AuthMissing { provider: "brave" });
+        }
+
+        let client = &self.ctx.client;
+        let api_key = self.api_key();
+        let q = augment_query(query, opts);
+        let count_str = count.to_string();
+        let freshness = opts.freshness.as_deref().map(map_freshness);
+
+        super::retry_request(|| async {
+            let mut req = client
+                .get("https://api.search.brave.com/res/v1/llm/context")
+                .header("X-Subscription-Token", api_key)
+                .header("Accept", "application/json")
+                .query(&[
+                    ("q", q.as_str()),
+                    ("count", &count_str),
+                    ("maximum_number_of_tokens", "16384"),
+                    ("context_threshold_mode", "balanced"),
+                ]);
+
+            if let Some(f) = freshness {
+                req = req.query(&[("freshness", f)]);
+            }
+
+            let resp = req.send().await?;
+
+            if resp.status() == 429 {
+                return Err(SearchError::RateLimited { provider: "brave" });
+            }
+            if !resp.status().is_success() {
+                return Err(SearchError::Api {
+                    provider: "brave",
+                    code: "api_error",
+                    message: format!("HTTP {}", resp.status()),
+                });
+            }
+
+            let body: serde_json::Value = resp.json().await?;
+            let mut results = Vec::new();
+
+            // Parse grounding.generic array
+            if let Some(generic) = body.pointer("/grounding/generic").and_then(|v| v.as_array()) {
+                for item in generic {
+                    let url = item.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+                    let title = item.get("title").and_then(|v| v.as_str()).unwrap_or_default();
+                    let snippets = item.get("snippets")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter()
+                            .filter_map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n"))
+                        .unwrap_or_default();
+
+                    results.push(SearchResult {
+                        title: title.to_string(),
+                        url: url.to_string(),
+                        snippet: snippets,
+                        source: "brave_llm_context".to_string(),
+                        published: None,
+                        image_url: None,
+                        extra: None,
+                    });
+                }
+            }
 
             Ok(results)
         })
