@@ -34,9 +34,10 @@ impl Tavily {
         let mut body = json!({
             "api_key": self.api_key(),
             "query": query,
-            "search_depth": "basic",
+            "search_depth": "advanced",
             "topic": topic,
             "max_results": count,
+            "include_answer": "basic",
             "include_raw_content": false,
         });
         if !opts.include_domains.is_empty() {
@@ -79,19 +80,32 @@ impl Tavily {
         .await?;
 
         let source = if topic == "news" { "tavily_news" } else { "tavily" };
-        let results = resp
-            .results
-            .into_iter()
-            .map(|r| SearchResult {
-                title: r.title.unwrap_or_default(),
-                url: r.url.unwrap_or_default(),
-                snippet: r.content.unwrap_or_default(),
-                source: source.to_string(),
-                published: None,
-                image_url: None,
-                extra: None,
-            })
-            .collect();
+        let mut results = Vec::new();
+
+        // Prepend the AI-generated answer if available
+        if let Some(answer) = resp.answer {
+            if !answer.is_empty() {
+                results.push(SearchResult {
+                    title: "AI Answer".to_string(),
+                    url: "tavily://answer".to_string(),
+                    snippet: answer,
+                    source: format!("{source}_answer"),
+                    published: None,
+                    image_url: None,
+                    extra: None,
+                });
+            }
+        }
+
+        results.extend(resp.results.into_iter().map(|r| SearchResult {
+            title: r.title.unwrap_or_default(),
+            url: r.url.unwrap_or_default(),
+            snippet: r.content.unwrap_or_default(),
+            source: source.to_string(),
+            published: r.published_time,
+            image_url: None,
+            extra: r.score.map(|s| json!({"score": s})),
+        }));
         Ok(results)
     }
 }
@@ -99,6 +113,7 @@ impl Tavily {
 #[derive(Deserialize)]
 struct TavilyResponse {
     results: Vec<TavilyResult>,
+    answer: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +121,8 @@ struct TavilyResult {
     title: Option<String>,
     url: Option<String>,
     content: Option<String>,
+    score: Option<f64>,
+    published_time: Option<String>,
 }
 
 #[async_trait]

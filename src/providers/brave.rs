@@ -41,6 +41,7 @@ struct BraveResult {
     title: Option<String>,
     url: Option<String>,
     description: Option<String>,
+    extra_snippets: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -108,7 +109,7 @@ impl super::Provider for Brave {
                 .get("https://api.search.brave.com/res/v1/web/search")
                 .header("X-Subscription-Token", api_key)
                 .header("Accept", "application/json")
-                .query(&[("q", q.as_str()), ("count", &count_str)]);
+                .query(&[("q", q.as_str()), ("count", &count_str), ("extra_snippets", "true")]);
 
             if let Some(f) = freshness {
                 req = req.query(&[("freshness", f)]);
@@ -140,14 +141,23 @@ impl super::Provider for Brave {
                 .map(|w| w.results)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|r| SearchResult {
-                    title: r.title.unwrap_or_default(),
-                    url: r.url.unwrap_or_default(),
-                    snippet: r.description.unwrap_or_default(),
-                    source: "brave".to_string(),
-                    published: None,
-                    image_url: None,
-                    extra: None,
+                .map(|r| {
+                    // Combine description with extra snippets for richer context
+                    let mut snippet = r.description.unwrap_or_default();
+                    if let Some(extras) = r.extra_snippets {
+                        for extra in extras {
+                            snippet = format!("{snippet}\n{extra}");
+                        }
+                    }
+                    SearchResult {
+                        title: r.title.unwrap_or_default(),
+                        url: r.url.unwrap_or_default(),
+                        snippet,
+                        source: "brave".to_string(),
+                        published: None,
+                        image_url: None,
+                        extra: None,
+                    }
                 })
                 .collect();
 

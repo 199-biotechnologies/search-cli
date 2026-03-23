@@ -51,7 +51,7 @@ impl super::Provider for Jina {
         Duration::from_secs(15)
     }
 
-    async fn search(&self, query: &str, count: usize, _opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
+    async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {
             return Err(SearchError::AuthMissing { provider: "jina" });
         }
@@ -60,13 +60,27 @@ impl super::Provider for Jina {
         let auth = format!("Bearer {}", self.api_key());
         let count_str = count.to_string();
 
+        // Apply domain filtering via query augmentation (Jina API doesn't have native domain filters)
+        let q = if opts.include_domains.is_empty() && opts.exclude_domains.is_empty() {
+            query.to_string()
+        } else {
+            let mut q = query.to_string();
+            for d in &opts.include_domains {
+                q = format!("{q} site:{d}");
+            }
+            for d in &opts.exclude_domains {
+                q = format!("{q} -site:{d}");
+            }
+            q
+        };
+
         super::retry_request(|| async {
             let resp = client
                 .get("https://s.jina.ai/")
                 .header("Authorization", &auth)
                 .header("Accept", "application/json")
                 .header("X-Retain-Images", "none")
-                .query(&[("q", query), ("count", &count_str)])
+                .query(&[("q", q.as_str()), ("count", &count_str)])
                 .send()
                 .await?;
 

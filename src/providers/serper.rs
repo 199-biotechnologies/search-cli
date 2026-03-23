@@ -138,19 +138,20 @@ impl super::Provider for Serper {
 
 impl Serper {
     pub async fn search_scholar(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let body = self.query_endpoint("scholar", query, count, &SearchOpts::default()).await?;
-        Ok(parse_organic(&body, "serper_scholar"))
+        self.search_special("scholar", query, count).await
     }
     pub async fn search_patents(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let body = self.query_endpoint("patents", query, count, &SearchOpts::default()).await?;
-        Ok(parse_organic(&body, "serper_patents"))
+        self.search_special("patents", query, count).await
     }
     pub async fn search_images(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let body = self.query_endpoint("images", query, count, &SearchOpts::default()).await?;
-        Ok(parse_organic(&body, "serper_images"))
+        self.search_special("images", query, count).await
     }
     pub async fn search_places(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
-        let body = self.query_endpoint("places", query, count, &SearchOpts::default()).await?;
-        Ok(parse_organic(&body, "serper_places"))
+        self.search_special("places", query, count).await
+    }
+
+    async fn search_special(&self, endpoint: &str, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
+        let body = self.query_endpoint(endpoint, query, count, &SearchOpts::default()).await?;
+        Ok(parse_organic(&body, &format!("serper_{endpoint}")))
     }
 }
