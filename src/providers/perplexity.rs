@@ -24,7 +24,9 @@ impl Perplexity {
         &self,
         query: &str,
         opts: &SearchOpts,
+        model: &str,
         recency_filter: Option<&str>,
+        search_mode: Option<&str>,
     ) -> Result<Vec<SearchResult>, SearchError> {
         if self.api_key().is_empty() {
             return Err(SearchError::AuthMissing {
@@ -33,9 +35,19 @@ impl Perplexity {
         }
 
         let mut body = json!({
-            "model": "sonar",
+            "model": model,
             "messages": [{"role": "user", "content": query}],
+            "return_related_questions": false,
+            "return_images": false,
+            "web_search_options": {
+                "search_context_size": "high"
+            },
         });
+
+        // Search mode: academic, sec, or web (default)
+        if let Some(sm) = search_mode {
+            body["search_mode"] = json!(sm);
+        }
 
         // Apply domain filter from opts
         if !opts.include_domains.is_empty() {
@@ -84,6 +96,7 @@ impl Perplexity {
         .await?;
 
         let mut results = Vec::new();
+        let source_label = format!("perplexity_{model}");
 
         // Extract the AI answer from the first choice
         let answer = resp
@@ -96,14 +109,27 @@ impl Perplexity {
             title: "AI Answer".to_string(),
             url: "perplexity://answer".to_string(),
             snippet: answer,
-            source: "perplexity".to_string(),
+            source: source_label.clone(),
             published: None,
             image_url: None,
             extra: None,
         });
 
-        // Add one result per citation URL
-        if let Some(citations) = resp.citations {
+        // Use structured search_results if available (sonar-pro returns these)
+        if let Some(search_results) = resp.search_results {
+            for sr in search_results {
+                results.push(SearchResult {
+                    title: sr.title.unwrap_or_default(),
+                    url: sr.url.unwrap_or_default(),
+                    snippet: sr.snippet.unwrap_or_else(|| "[Search result]".to_string()),
+                    source: format!("{source_label}_result"),
+                    published: sr.date,
+                    image_url: None,
+                    extra: None,
+                });
+            }
+        } else if let Some(citations) = resp.citations {
+            // Fallback: one result per citation URL
             for cite_url in citations {
                 let hostname = url::Url::parse(&cite_url)
                     .ok()
@@ -130,6 +156,7 @@ impl Perplexity {
 struct PerplexityResponse {
     choices: Vec<PerplexityChoice>,
     citations: Option<Vec<String>>,
+    search_results: Option<Vec<PerplexitySearchResult>>,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +167,14 @@ struct PerplexityChoice {
 #[derive(Deserialize)]
 struct PerplexityMessage {
     content: String,
+}
+
+#[derive(Deserialize)]
+struct PerplexitySearchResult {
+    title: Option<String>,
+    url: Option<String>,
+    snippet: Option<String>,
+    date: Option<String>,
 }
 
 #[async_trait]
@@ -154,7 +189,7 @@ impl super::Provider for Perplexity {
         !self.api_key().is_empty()
     }
     fn timeout(&self) -> Duration {
-        Duration::from_secs(20)
+        Duration::from_secs(30)
     }
 
     async fn search(
@@ -163,7 +198,8 @@ impl super::Provider for Perplexity {
         _count: usize,
         opts: &SearchOpts,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        self.do_search(query, opts, None).await
+        // Use sonar-pro for better results with structured search_results
+        self.do_search(query, opts, "sonar-pro", None, None).await
     }
 
     async fn search_news(
@@ -174,6 +210,31 @@ impl super::Provider for Perplexity {
     ) -> Result<Vec<SearchResult>, SearchError> {
         // Default to "day" recency for news if no freshness specified
         let recency = opts.freshness.as_deref().unwrap_or("day");
-        self.do_search(query, opts, Some(recency)).await
+        self.do_search(query, opts, "sonar-pro", Some(recency), None)
+            .await
+    }
+}
+
+impl Perplexity {
+    /// Academic search using search_mode: "academic"
+    pub async fn search_academic(
+        &self,
+        query: &str,
+        count: usize,
+        opts: &SearchOpts,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        self.do_search(query, opts, "sonar-pro", None, Some("academic"))
+            .await
+    }
+
+    /// Deep research using sonar-reasoning-pro for complex queries
+    pub async fn search_deep(
+        &self,
+        query: &str,
+        count: usize,
+        opts: &SearchOpts,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        self.do_search(query, opts, "sonar-reasoning-pro", None, None)
+            .await
     }
 }

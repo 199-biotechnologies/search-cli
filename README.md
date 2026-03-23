@@ -5,7 +5,7 @@
 <h1 align="center">search</h1>
 
 <p align="center">
-  <strong>One binary. Five search APIs. Thirteen modes. Zero dependencies.</strong><br>
+  <strong>One binary. Eleven providers. Fourteen modes. Zero dependencies.</strong><br>
   <em>Built for <a href="https://github.com/openclaw">OpenClaw</a> agents, Claude Code, and any AI that needs to search the web.</em>
 </p>
 
@@ -19,7 +19,7 @@
 
 ---
 
-A single Rust binary that aggregates Brave, Serper (Google), Exa, Jina, and Firecrawl into one unified search interface. Designed from day one for AI agents — structured JSON output, semantic exit codes, machine-readable capabilities, and auto-JSON when piped.
+A single Rust binary that aggregates 11 search providers into one unified search interface. Designed from day one for AI agents — structured JSON output, semantic exit codes, machine-readable capabilities, and auto-JSON when piped.
 
 Works with [OpenClaw](https://github.com/openclaw), Claude Code, Codex CLI, Gemini CLI, or any agent framework that can shell out to a command.
 
@@ -33,11 +33,16 @@ That's it. Auto-detects your intent, fans out to the right providers in parallel
 
 ## Why
 
-Every search API is good at something different. Brave has its own 35-billion page index. Serper gives you raw Google results plus Scholar, Patents, and Places. Exa does neural/semantic search and finds LinkedIn profiles. Jina reads any URL into clean markdown. Firecrawl renders JavaScript-heavy pages.
+Every search API is good at something different. Brave has its own 35-billion page index. Serper gives you raw Google results plus Scholar, Patents, and Places. Exa does neural/semantic search and finds LinkedIn profiles. Perplexity gives AI-synthesized answers with citations using Sonar Pro. Jina reads any URL into clean markdown. Firecrawl renders JavaScript-heavy pages. xAI searches X/Twitter via Grok.
 
 **search** routes your query to the right combination automatically — or lets you pick exactly which providers to use.
 
 ## Install
+
+**Cargo (recommended):**
+```bash
+cargo install agent-search
+```
 
 **One-liner (macOS / Linux):**
 ```bash
@@ -50,7 +55,7 @@ brew tap 199-biotechnologies/tap
 brew install search-cli
 ```
 
-**Cargo:**
+**From source:**
 ```bash
 cargo install --git https://github.com/199-biotechnologies/search-cli
 ```
@@ -66,10 +71,16 @@ search config set keys.serper YOUR_SERPER_KEY
 search config set keys.exa YOUR_EXA_KEY
 search config set keys.jina YOUR_JINA_KEY
 search config set keys.firecrawl YOUR_FIRECRAWL_KEY
+search config set keys.tavily YOUR_TAVILY_KEY
+search config set keys.serpapi YOUR_SERPAPI_KEY
+search config set keys.perplexity YOUR_PERPLEXITY_KEY
+search config set keys.browserless YOUR_BROWSERLESS_KEY
+search config set keys.xai YOUR_XAI_KEY
 
 # Or use environment variables
 export SEARCH_KEYS_BRAVE=YOUR_KEY
 export SEARCH_KEYS_EXA=YOUR_KEY
+export SEARCH_KEYS_XAI=YOUR_KEY
 
 # 2. Search
 search "your query here"
@@ -83,6 +94,7 @@ search "quantum computing advances"
 search "who is the CEO of Anthropic"
 search "latest AI news today"
 search "CRISPR research papers"
+search "trending on twitter AI"
 
 # Force a specific mode
 search search -q "transformer architectures" -m academic
@@ -91,10 +103,12 @@ search search -q "AI startups 2026" -m news
 search search -q "BRCA1 gene patent" -m patents
 search search -q "coffee shops near me" -m places
 search search -q "https://example.com" -m extract
+search search -q "what are people saying about Rust" -m social
 
 # Pick specific providers
 search search -q "machine learning" -p exa              # Exa only
 search search -q "rust programming" -p brave,serper      # Brave + Serper
+search search -q "trending AI" -p xai                    # xAI X/Twitter only
 search search -q "https://arxiv.org/..." -p jina         # Jina reader only
 
 # Control output
@@ -111,18 +125,19 @@ search "query" 2>/dev/null             # Suppress diagnostics
 | Mode | What it does | Providers used |
 |------|-------------|----------------|
 | `auto` | Detects intent from your query | *varies* |
-| `general` | Broad web search | Brave + Serper + Exa + Jina |
-| `news` | Breaking news, current events | Brave News + Serper News |
-| `academic` | Research papers, studies | Exa + Serper |
+| `general` | Broad web search | Brave + Serper + Exa + Jina + Tavily + Perplexity |
+| `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity |
+| `academic` | Research papers, studies | Exa + Serper + Tavily + Perplexity |
 | `people` | LinkedIn profiles, bios | Exa |
-| `deep` | Maximum coverage | Exa + Serper |
-| `scholar` | Google Scholar | Serper |
+| `deep` | Maximum coverage | Exa + Serper + Tavily + Perplexity |
+| `scholar` | Google Scholar | Serper + SerpApi |
 | `patents` | Patent search | Serper |
 | `images` | Image search | Serper |
 | `places` | Local businesses, maps | Serper |
-| `extract` | Full text from a URL | Jina Reader -> Firecrawl |
-| `scrape` | Page scraping | Jina Reader -> Firecrawl |
+| `extract` | Full text from a URL | Stealth -> Jina -> Firecrawl -> Browserless |
+| `scrape` | Page scraping | Stealth -> Jina -> Firecrawl -> Browserless |
 | `similar` | Find similar pages to a URL | Exa |
+| `social` | X/Twitter social search | xAI (Grok) |
 
 ## Providers
 
@@ -133,6 +148,12 @@ search "query" 2>/dev/null             # Suppress diagnostics
 | **Exa** | Neural/semantic search, category filters | Research papers, LinkedIn people, finding similar sites |
 | **Jina** | Fast URL-to-markdown, 500 RPM free tier | Reading article content, quick extraction |
 | **Firecrawl** | JavaScript rendering, structured extraction | Dynamic pages, SPAs, data extraction |
+| **Tavily** | General, news, academic, deep search | Broad coverage, research-oriented queries |
+| **SerpApi** | 80+ engines: Google, Bing, YouTube, Baidu | Scholar, multi-engine coverage |
+| **Perplexity** | AI-powered answers with citations (Sonar Pro) | Complex queries, synthesized answers with sources |
+| **Browserless** | Cloud browser for Cloudflare/JS-heavy pages | Anti-bot bypass, dynamic page rendering |
+| **Stealth** | Anti-bot stealth scraper | Extracting content from protected pages |
+| **xAI** | X/Twitter search via Grok AI | Tweets, trending topics, social sentiment |
 
 ## Agent Integration
 
@@ -197,6 +218,11 @@ export SEARCH_KEYS_SERPER=your-key
 export SEARCH_KEYS_EXA=your-key
 export SEARCH_KEYS_JINA=your-key
 export SEARCH_KEYS_FIRECRAWL=your-key
+export SEARCH_KEYS_TAVILY=your-key
+export SEARCH_KEYS_SERPAPI=your-key
+export SEARCH_KEYS_PERPLEXITY=your-key
+export SEARCH_KEYS_BROWSERLESS=your-key
+export SEARCH_KEYS_XAI=your-key
 ```
 
 ## How It Works
@@ -207,7 +233,8 @@ export SEARCH_KEYS_FIRECRAWL=your-key
 4. **Fan out** — `tokio::JoinSet` fires all providers in parallel with per-provider timeouts
 5. **Collect** — Results stream in as providers respond (no waiting for the slowest)
 6. **Dedup** — URL normalization removes duplicates across providers
-7. **Render** — JSON envelope or colored terminal table, auto-detected from context
+7. **Log** — Every search is logged to `~/Library/Application Support/search/logs/` (JSONL)
+8. **Render** — JSON envelope or colored terminal table, auto-detected from context
 
 ## Updating
 

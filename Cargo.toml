@@ -1,9 +1,15 @@
 [package]
-name = "search-cli"
-version = "0.3.1"
+name = "agent-search"
+version = "0.4.0"
 edition = "2021"
-description = "Agent-friendly multi-provider search CLI"
+description = "Agent-friendly multi-provider search CLI — 11 providers, 14 modes, one binary"
 license = "MIT"
+repository = "https://github.com/199-biotechnologies/search-cli"
+homepage = "https://github.com/199-biotechnologies/search-cli"
+documentation = "https://github.com/199-biotechnologies/search-cli#readme"
+keywords = ["search", "cli", "ai-agent", "web-search", "api"]
+categories = ["command-line-utilities", "web-programming"]
+readme = "README.md"
 
 [[bin]]
 name = "search"

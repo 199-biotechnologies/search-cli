@@ -9,6 +9,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-search"
+version = "0.4.0"
+dependencies = [
+ "assert_cmd",
+ "async-trait",
+ "backon",
+ "clap",
+ "comfy-table",
+ "directories",
+ "figment",
+ "indicatif 0.17.11",
+ "mimalloc",
+ "owo-colors",
+ "predicates",
+ "readability",
+ "regex",
+ "reqwest 0.12.28",
+ "rquest",
+ "rquest-util",
+ "self_update",
+ "serde",
+ "serde_json",
+ "simd-json",
+ "thiserror 2.0.18",
+ "tl",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2427,39 +2460,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "search-cli"
-version = "0.3.0"
-dependencies = [
- "assert_cmd",
- "async-trait",
- "backon",
- "clap",
- "comfy-table",
- "directories",
- "figment",
- "indicatif 0.17.11",
- "mimalloc",
- "owo-colors",
- "predicates",
- "readability",
- "regex",
- "reqwest 0.12.28",
- "rquest",
- "rquest-util",
- "self_update",
- "serde",
- "serde_json",
- "simd-json",
- "thiserror 2.0.18",
- "tl",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "url",
-]
 
 [[package]]
 name = "security-framework"
