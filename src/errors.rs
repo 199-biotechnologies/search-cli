@@ -62,13 +62,20 @@ impl SearchError {
     pub fn suggestion(&self) -> Option<String> {
         match self {
             Self::AuthMissing { provider } => Some(format!(
-                "Set SEARCH_{}_KEY env var or add to ~/.config/search/config.toml",
-                provider.to_uppercase()
+                "Set SEARCH_KEYS_{} env var or run: search config set keys.{} YOUR_KEY",
+                provider.to_uppercase(),
+                provider
             )),
-            Self::NoProviders(_) => {
-                Some("Configure at least one provider API key".to_string())
+            Self::NoProviders(mode) => {
+                Some(format!(
+                    "No providers configured for mode '{}'. Run: search config check",
+                    mode
+                ))
             }
-            Self::RateLimited { .. } => Some("Wait and retry".to_string()),
+            Self::RateLimited { provider } => Some(format!(
+                "Rate limited by {}. Wait and retry, or use a different provider: search -p <other>",
+                provider
+            )),
             _ => None,
         }
     }

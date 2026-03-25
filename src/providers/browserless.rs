@@ -26,10 +26,7 @@ impl Browserless {
             });
         }
 
-        let endpoint = format!(
-            "https://production-sfo.browserless.io/content?token={}",
-            self.api_key()
-        );
+        let endpoint = "https://production-sfo.browserless.io/content";
 
         let body = serde_json::json!({
             "url": url,
@@ -37,11 +34,13 @@ impl Browserless {
         });
 
         let client = &self.ctx.client;
+        let token = self.api_key().to_string();
 
         let resp = super::retry_request(|| async {
             let r = client
-                .post(&endpoint)
+                .post(endpoint)
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", token))
                 .json(&body)
                 .send()
                 .await?;

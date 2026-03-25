@@ -57,13 +57,7 @@ impl Perplexity {
         // Apply recency filter: explicit param first, then opts.freshness
         let recency = recency_filter.or(opts.freshness.as_deref());
         if let Some(r) = recency {
-            let rf = match r {
-                "day" => "day",
-                "week" => "week",
-                "month" => "month",
-                other => other,
-            };
-            body["search_recency_filter"] = json!(rf);
+            body["search_recency_filter"] = json!(r);
         }
 
         // Perplexity needs a longer timeout than the global 10s client

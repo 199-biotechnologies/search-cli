@@ -71,11 +71,11 @@ impl Serper {
 
             let body_bytes = resp.bytes().await?;
             let mut body_vec = body_bytes.to_vec();
-            Ok(simd_json::from_slice(&mut body_vec).map_err(|e| SearchError::Api {
+            simd_json::from_slice(&mut body_vec).map_err(|e| SearchError::Api {
                 provider: "serper",
                 code: "json_error",
                 message: e.to_string(),
-            })?)
+            })
         })
         .await
     }

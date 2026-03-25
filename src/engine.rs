@@ -86,7 +86,7 @@ pub async fn execute_search(
         })
         .collect();
 
-    if active.is_empty() && speculative_set.len() == 0 {
+    if active.is_empty() && speculative_set.is_empty() {
         return Err(SearchError::NoProviders(resolved_mode.to_string()));
     }
 
@@ -97,6 +97,19 @@ pub async fn execute_search(
     if is_auto && only_providers.is_none() {
         if !ctx.config.keys.brave.is_empty() { providers_queried.push("brave".to_string()); }
         if !ctx.config.keys.serper.is_empty() { providers_queried.push("serper".to_string()); }
+    }
+
+    // For Deep mode, also launch Brave LLM Context API in parallel
+    if resolved_mode == Mode::Deep && !ctx.config.keys.brave.is_empty() {
+        let q = query_arc.clone();
+        let c = count;
+        let o = opts.clone();
+        let brave = providers::brave::Brave::new(ctx.clone());
+        set.spawn(async move {
+            let result = timeout(Duration::from_secs(15), brave.search_llm_context(&q, c, &o)).await;
+            ("brave_llm_context", result)
+        });
+        providers_queried.push("brave_llm_context".to_string());
     }
 
     for provider in active {
@@ -179,9 +192,20 @@ pub async fn execute_search(
 
     let elapsed = start.elapsed();
 
+    // Determine accurate status for agents
+    let status = if all_results.is_empty() && !providers_failed.is_empty() {
+        "all_providers_failed"
+    } else if !all_results.is_empty() && !providers_failed.is_empty() {
+        "partial_success"
+    } else if all_results.is_empty() {
+        "no_results"
+    } else {
+        "success"
+    };
+
     Ok(SearchResponse {
         version: "1".into(),
-        status: "success".into(),
+        status: status.into(),
         query: query.to_string(),
         mode: resolved_mode.to_string(),
         results: all_results,
@@ -410,9 +434,19 @@ pub async fn execute_special(
     let elapsed = start.elapsed();
     let result_count = results.len();
 
+    let status = if results.is_empty() && !providers_failed.is_empty() {
+        "all_providers_failed"
+    } else if !results.is_empty() && !providers_failed.is_empty() {
+        "partial_success"
+    } else if results.is_empty() {
+        "no_results"
+    } else {
+        "success"
+    };
+
     Ok(SearchResponse {
         version: "1".into(),
-        status: "success".into(),
+        status: status.into(),
         query: query.to_string(),
         mode: mode.to_string(),
         results,
@@ -435,18 +469,27 @@ pub async fn run(
     only_providers: &Option<Vec<String>>,
     opts: &SearchOpts,
 ) -> Result<SearchResponse, SearchError> {
-    let resolved_mode = if mode == Mode::Auto {
-        classify_intent(query)
-    } else {
-        mode
-    };
-
-    let mut response = match resolved_mode {
-        Mode::Scholar | Mode::Patents | Mode::Images | Mode::Places | Mode::People
-        | Mode::Similar | Mode::Scrape | Mode::Extract | Mode::Social => {
-            execute_special(ctx, query, resolved_mode, count, only_providers, opts).await?
+    // For Auto mode, check if it would resolve to a special mode.
+    // If so, route to execute_special with the resolved mode.
+    // Otherwise, pass Mode::Auto to execute_search so speculative execution works.
+    let mut response = if mode == Mode::Auto {
+        let resolved = classify_intent(query);
+        match resolved {
+            Mode::Scholar | Mode::Patents | Mode::Images | Mode::Places | Mode::People
+            | Mode::Similar | Mode::Scrape | Mode::Extract | Mode::Social => {
+                execute_special(ctx, query, resolved, count, only_providers, opts).await?
+            }
+            // Pass Auto to execute_search — it handles speculation + classification internally
+            _ => execute_search(ctx, query, Mode::Auto, count, only_providers, opts).await?,
         }
-        _ => execute_search(ctx, query, resolved_mode, count, only_providers, opts).await?,
+    } else {
+        match mode {
+            Mode::Scholar | Mode::Patents | Mode::Images | Mode::Places | Mode::People
+            | Mode::Similar | Mode::Scrape | Mode::Extract | Mode::Social => {
+                execute_special(ctx, query, mode, count, only_providers, opts).await?
+            }
+            _ => execute_search(ctx, query, mode, count, only_providers, opts).await?,
+        }
     };
 
     response.metadata.result_count = response.results.len();

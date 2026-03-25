@@ -48,14 +48,7 @@ impl Tavily {
         }
         // Tavily time_range: day, week, month, year
         if let Some(f) = &opts.freshness {
-            let tr = match f.as_str() {
-                "day" => "day",
-                "week" => "week",
-                "month" => "month",
-                "year" => "year",
-                other => other,
-            };
-            body["time_range"] = json!(tr);
+            body["time_range"] = json!(f);
         }
 
         let client = &self.ctx.client;

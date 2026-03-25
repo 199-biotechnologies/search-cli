@@ -3,7 +3,6 @@ use crate::errors::SearchError;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -40,7 +40,7 @@ async fn main() {
     });
 
     // 2. Start loading config in parallel with CLI parsing
-    let config_handle = tokio::task::spawn_blocking(|| load_config());
+    let config_handle = tokio::task::spawn_blocking(load_config);
 
     // 3. CLI Parsing (fast, but we want to overlap it with I/O)
     let cli = Cli::parse();
@@ -132,7 +132,11 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                     }
                     return Ok(0);
                 } else {
-                    eprintln!("No cached results found. Run a search first.");
+                    let err = errors::SearchError::Config("No cached results found. Run a search first.".into());
+                    match *format {
+                        OutputFormat::Json => output::json::render_error(&err),
+                        OutputFormat::Table => eprintln!("No cached results found. Run a search first."),
+                    }
                     return Ok(1);
                 }
             }
@@ -209,9 +213,75 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
 
         Commands::Config { action } => {
             match action {
-                ConfigAction::Show => config_show(&ctx.config),
-                ConfigAction::Set { key, value } => config_set(&key, &value)?,
-                ConfigAction::Check => config_check(&ctx.config),
+                ConfigAction::Show => {
+                    if matches!(*format, OutputFormat::Json) {
+                        let configured: Vec<&str> = [
+                            ("brave", !ctx.config.keys.brave.is_empty()),
+                            ("serper", !ctx.config.keys.serper.is_empty()),
+                            ("exa", !ctx.config.keys.exa.is_empty()),
+                            ("jina", !ctx.config.keys.jina.is_empty()),
+                            ("firecrawl", !ctx.config.keys.firecrawl.is_empty()),
+                            ("tavily", !ctx.config.keys.tavily.is_empty()),
+                            ("serpapi", !ctx.config.keys.serpapi.is_empty()),
+                            ("perplexity", !ctx.config.keys.perplexity.is_empty()),
+                            ("browserless", !ctx.config.keys.browserless.is_empty()),
+                            ("xai", !ctx.config.keys.xai.is_empty()),
+                        ].iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
+                        let info = serde_json::json!({
+                            "version": "1",
+                            "status": "success",
+                            "config_path": config::config_path().to_string_lossy(),
+                            "settings": {
+                                "timeout": ctx.config.settings.timeout,
+                                "count": ctx.config.settings.count,
+                            },
+                            "providers_configured": configured,
+                        });
+                        output::json::render_value(&info);
+                    } else {
+                        config_show(&ctx.config);
+                    }
+                }
+                ConfigAction::Set { key, value } => {
+                    config_set(&key, &value)?;
+                    if matches!(*format, OutputFormat::Json) {
+                        output::json::render_value(&serde_json::json!({
+                            "version": "1",
+                            "status": "success",
+                            "key": key,
+                            "message": format!("Set {key}"),
+                        }));
+                    }
+                }
+                ConfigAction::Check => {
+                    if matches!(*format, OutputFormat::Json) {
+                        let all = [
+                            ("brave", !ctx.config.keys.brave.is_empty()),
+                            ("serper", !ctx.config.keys.serper.is_empty()),
+                            ("exa", !ctx.config.keys.exa.is_empty()),
+                            ("jina", !ctx.config.keys.jina.is_empty()),
+                            ("firecrawl", !ctx.config.keys.firecrawl.is_empty()),
+                            ("tavily", !ctx.config.keys.tavily.is_empty()),
+                            ("serpapi", !ctx.config.keys.serpapi.is_empty()),
+                            ("perplexity", !ctx.config.keys.perplexity.is_empty()),
+                            ("browserless", !ctx.config.keys.browserless.is_empty()),
+                            ("xai", !ctx.config.keys.xai.is_empty()),
+                        ];
+                        let configured: Vec<&str> = all.iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
+                        let unconfigured: Vec<&str> = all.iter().filter(|(_, v)| !v).map(|(k, _)| *k).collect();
+                        let total = all.len();
+                        output::json::render_value(&serde_json::json!({
+                            "version": "1",
+                            "status": "success",
+                            "configured_count": configured.len(),
+                            "total_count": total,
+                            "configured": configured,
+                            "unconfigured": unconfigured,
+                        }));
+                    } else {
+                        config_check(&ctx.config);
+                    }
+                }
             }
             Ok(0)
         }
@@ -286,7 +356,6 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
         Commands::Update { check } => {
             let current = env!("CARGO_PKG_VERSION");
             if check {
-                eprintln!("Current version: {current}");
                 match self_update::backends::github::Update::configure()
                     .repo_owner("199-biotechnologies")
                     .repo_name("search-cli")
@@ -296,16 +365,46 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 {
                     Ok(updater) => match updater.get_latest_release() {
                         Ok(release) => {
-                            if release.version != current {
+                            let up_to_date = release.version == current;
+                            if matches!(*format, OutputFormat::Json) {
+                                output::json::render_value(&serde_json::json!({
+                                    "version": "1",
+                                    "status": "success",
+                                    "current_version": current,
+                                    "latest_version": release.version,
+                                    "update_available": !up_to_date,
+                                }));
+                            } else if !up_to_date {
+                                eprintln!("Current version: {current}");
                                 eprintln!("New version available: {}", release.version);
                                 eprintln!("Run `search update` to install");
                             } else {
-                                eprintln!("Already up to date");
+                                eprintln!("Already up to date (v{current})");
                             }
                         }
-                        Err(e) => eprintln!("Could not check for updates: {e}"),
+                        Err(e) => {
+                            if matches!(*format, OutputFormat::Json) {
+                                let err = errors::SearchError::Api {
+                                    provider: "github",
+                                    code: "update_check_failed",
+                                    message: e.to_string(),
+                                };
+                                output::json::render_error(&err);
+                            } else {
+                                eprintln!("Could not check for updates: {e}");
+                            }
+                            return Ok(1);
+                        }
                     },
-                    Err(e) => eprintln!("Update check failed: {e}"),
+                    Err(e) => {
+                        if matches!(*format, OutputFormat::Json) {
+                            let err = errors::SearchError::Config(format!("Update check failed: {e}"));
+                            output::json::render_error(&err);
+                        } else {
+                            eprintln!("Update check failed: {e}");
+                        }
+                        return Ok(1);
+                    }
                 }
             } else {
                 eprintln!("Updating search from v{current}...");
@@ -318,15 +417,27 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                     .and_then(|u| u.update())
                 {
                     Ok(status) => {
-                        if status.updated() {
+                        if matches!(*format, OutputFormat::Json) {
+                            output::json::render_value(&serde_json::json!({
+                                "version": "1",
+                                "status": "success",
+                                "updated": status.updated(),
+                                "version_installed": status.version(),
+                            }));
+                        } else if status.updated() {
                             eprintln!("Updated to v{}", status.version());
                         } else {
                             eprintln!("Already up to date (v{current})");
                         }
                     }
                     Err(e) => {
-                        eprintln!("Update failed: {e}");
-                        eprintln!("You can update manually: cargo install search-cli");
+                        if matches!(*format, OutputFormat::Json) {
+                            let err = errors::SearchError::Config(format!("Update failed: {e}"));
+                            output::json::render_error(&err);
+                        } else {
+                            eprintln!("Update failed: {e}");
+                            eprintln!("You can update manually: cargo install agent-search");
+                        }
                         return Ok(1);
                     }
                 }
