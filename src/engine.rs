@@ -15,7 +15,7 @@ fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
         Mode::Auto | Mode::General => &["brave", "serper", "exa", "jina", "tavily", "perplexity"],
         Mode::News => &["brave", "serper", "tavily", "perplexity"],
         Mode::Academic => &["exa", "serper", "tavily", "perplexity"],
-        Mode::Deep => &["brave", "exa", "serper", "tavily", "perplexity"],
+        Mode::Deep => &["brave", "exa", "serper", "tavily", "perplexity", "xai"],
         Mode::Scholar => &["serper", "serpapi"],
         Mode::Patents => &["serper"],
         Mode::People => &["exa"],

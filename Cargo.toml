@@ -1,6 +1,6 @@
 [package]
 name = "agent-search"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "Agent-friendly multi-provider search CLI — 11 providers, 14 modes, one binary"
 license = "MIT"

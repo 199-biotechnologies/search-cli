@@ -123,7 +123,13 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
     };
 
     match command {
-        Commands::Search(args) => {
+        Commands::Search(mut args) => {
+            // --x flag: force X/Twitter search via xAI Grok
+            if cli.x_only {
+                args.mode = types::Mode::Social;
+                args.providers = Some(vec!["xai".to_string()]);
+            }
+
             if cli.last {
                 if let Some(cached) = cache::load_last() {
                     match *format {

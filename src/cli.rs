@@ -29,6 +29,7 @@ use clap::{Parser, Subcommand};
           search search -q \"trending on twitter\" -m social # X/Twitter search\n  \
           search search -q \"query\" -p exa                 # force Exa only\n  \
           search search -q \"query\" -p exa,brave           # only Exa + Brave\n  \
+          search --x \"AI agents\"                          # search X (Twitter) only\n  \
           search \"query\" --json | jq '.results[].url'     # pipe JSON to jq"
 )]
 pub struct Cli {
@@ -50,6 +51,10 @@ pub struct Cli {
     /// Replay the last search result from cache
     #[arg(long, global = true)]
     pub last: bool,
+
+    /// Search X (Twitter) only — shorthand for -m social -p xai
+    #[arg(long = "x", global = true)]
+    pub x_only: bool,
 }
 
 #[derive(Subcommand)]
