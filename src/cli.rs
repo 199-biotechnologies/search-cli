@@ -96,7 +96,7 @@ pub struct SearchArgs {
     #[arg(short, long)]
     pub count: Option<usize>,
 
-    /// Use only specific providers (comma-separated: brave,exa,serper,jina,firecrawl,tavily,xai)
+    /// Use only specific providers (comma-separated: brave,serper,exa,jina,firecrawl,tavily,serpapi,perplexity,browserless,stealth,xai)
     #[arg(short, long, value_delimiter = ',')]
     pub providers: Option<Vec<String>>,
 

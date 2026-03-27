@@ -149,27 +149,37 @@ impl Stealth {
 fn extract_text_fallback(html: &str) -> String {
     let mut text = String::with_capacity(html.len() / 3);
     let mut in_tag = false;
-    let mut in_script = false;
-    for c in html.chars() {
-        match c {
-            '<' => {
+    let mut in_skip = false;
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => {
                 in_tag = true;
-                // Check for script/style start
-                let rest = &html[html.len().saturating_sub(html.len())..];
-                if rest.starts_with("<script") || rest.starts_with("<style") {
-                    in_script = true;
+                // Check for <script or <style start
+                let rest = &html[i..];
+                if rest.len() > 7
+                    && (rest[..7].eq_ignore_ascii_case("<script")
+                        || rest[..6].eq_ignore_ascii_case("<style"))
+                {
+                    in_skip = true;
+                }
+                // Check for </script> or </style> end
+                if in_skip
+                    && rest.len() > 8
+                    && (rest[..9].eq_ignore_ascii_case("</script>")
+                        || rest[..8].eq_ignore_ascii_case("</style>"))
+                {
+                    in_skip = false;
                 }
             }
-            '>' => {
+            b'>' => {
                 in_tag = false;
-                if in_script {
-                    // crude: reset on closing tag
-                    in_script = false;
-                }
             }
-            _ if !in_tag && !in_script => text.push(c),
+            _ if !in_tag && !in_skip => text.push(bytes[i] as char),
             _ => {}
         }
+        i += 1;
     }
     // Collapse whitespace
     text.split_whitespace().collect::<Vec<_>>().join(" ")

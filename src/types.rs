@@ -6,15 +6,15 @@ use std::fmt;
 pub enum Mode {
     /// Auto-detect intent from query (default)
     Auto,
-    /// General web search (Brave + Serper + Exa + Jina)
+    /// General web search (Brave + Serper + Exa + Jina + Tavily + Perplexity)
     General,
-    /// Breaking news and current events (Brave News + Serper News)
+    /// Breaking news and current events (Brave + Serper + Tavily + Perplexity)
     News,
-    /// Research papers and studies (Exa + Serper)
+    /// Research papers and studies (Exa + Serper + Tavily + Perplexity)
     Academic,
     /// Find people, LinkedIn profiles (Exa)
     People,
-    /// Comprehensive multi-engine coverage (Exa + Serper)
+    /// Maximum coverage (Brave LLM Context + Exa + Serper + Tavily + Perplexity + xAI)
     Deep,
     /// Extract full text content from a URL (Jina Reader -> Firecrawl)
     Extract,

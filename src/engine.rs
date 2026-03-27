@@ -67,6 +67,19 @@ pub async fn execute_search(
         mode
     };
 
+    // If auto resolved to a mode where Brave/Serper aren't wanted,
+    // abort speculative tasks to avoid mixing generic web results into
+    // intent-specific searches (e.g. news, social, academic).
+    let spec_compatible = matches!(
+        resolved_mode,
+        Mode::Auto | Mode::General | Mode::Deep
+    );
+    if !spec_compatible {
+        speculative_set.abort_all();
+        // Drain aborted tasks so they don't merge later
+        while speculative_set.join_next().await.is_some() {}
+    }
+
     let all_providers = providers::build_providers(&ctx);
     let wanted = providers_for_mode(resolved_mode);
 
@@ -93,8 +106,8 @@ pub async fn execute_search(
     let mut set = JoinSet::new();
     let mut providers_queried = Vec::new();
 
-    // Re-add speculative ones to the tracking list
-    if is_auto && only_providers.is_none() {
+    // Re-add speculative ones to the tracking list (only if they weren't aborted)
+    if is_auto && only_providers.is_none() && spec_compatible {
         if !ctx.config.keys.brave.is_empty() { providers_queried.push("brave".to_string()); }
         if !ctx.config.keys.serper.is_empty() { providers_queried.push("serper".to_string()); }
     }

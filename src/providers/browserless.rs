@@ -63,8 +63,11 @@ impl Browserless {
         .await?;
 
         // resp is fully rendered HTML — extract with readability
-        let parsed_url = url::Url::parse(url)
-            .unwrap_or_else(|_| url::Url::parse("https://example.com").unwrap());
+        let parsed_url = url::Url::parse(url).map_err(|e| SearchError::Api {
+            provider: "browserless",
+            code: "invalid_url",
+            message: format!("Invalid URL '{}': {}", url, e),
+        })?;
 
         let mut cursor = std::io::Cursor::new(resp.as_bytes());
         let (title, text) = match readability::extractor::extract(&mut cursor, &parsed_url) {

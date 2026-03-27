@@ -105,6 +105,10 @@ search search -q "coffee shops near me" -m places
 search search -q "https://example.com" -m extract
 search search -q "what are people saying about Rust" -m social
 
+# Search X (Twitter) only
+search --x "AI agents"                                   # shorthand for -m social -p xai
+search search -q "trending AI" -m social                 # explicit social mode
+
 # Pick specific providers
 search search -q "machine learning" -p exa              # Exa only
 search search -q "rust programming" -p brave,serper      # Brave + Serper
@@ -129,7 +133,7 @@ search "query" 2>/dev/null             # Suppress diagnostics
 | `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity |
 | `academic` | Research papers, studies | Exa + Serper + Tavily + Perplexity |
 | `people` | LinkedIn profiles, bios | Exa |
-| `deep` | Maximum coverage | Brave (LLM Context) + Exa + Serper + Tavily + Perplexity |
+| `deep` | Maximum coverage | Brave (LLM Context) + Exa + Serper + Tavily + Perplexity + xAI |
 | `scholar` | Google Scholar | Serper + SerpApi |
 | `patents` | Patent search | Serper |
 | `images` | Image search | Serper |

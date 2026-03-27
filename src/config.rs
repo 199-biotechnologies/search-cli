@@ -136,11 +136,19 @@ pub fn config_show(config: &AppConfig) {
         ("xai", &config.keys.xai),
     ];
 
+    // xAI also accepts XAI_API_KEY env var
+    let xai_env = std::env::var("XAI_API_KEY").unwrap_or_default();
+
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
     for (name, key) in &keys {
-        let masked = mask_key(key);
+        let effective = if key.is_empty() && *name == "xai" && !xai_env.is_empty() {
+            &xai_env
+        } else {
+            key.as_str()
+        };
+        let masked = mask_key(effective);
         if c {
-            let val = if key.is_empty() {
+            let val = if effective.is_empty() {
                 masked.red().to_string()
             } else {
                 masked.green().to_string()
@@ -199,7 +207,6 @@ pub fn config_set(key: &str, value: &str) -> Result<(), crate::errors::SearchErr
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, doc.to_string())?;
-    println!("Set {key} in {}", path.display());
     Ok(())
 }
 
@@ -221,13 +228,17 @@ pub fn config_check(config: &AppConfig) {
         ("xai", &config.keys.xai, "X/Twitter social search via xAI Grok"),
     ];
 
+    // xAI also accepts XAI_API_KEY env var (xAI's convention)
+    let xai_env = std::env::var("XAI_API_KEY").unwrap_or_default();
+
     if c {
         println!("\n{}  Provider Health Check\n", "search".bold().cyan());
     }
 
     let mut configured = 0;
     for (name, key, desc) in &providers {
-        if key.is_empty() {
+        let is_configured = !key.is_empty() || (*name == "xai" && !xai_env.is_empty());
+        if !is_configured {
             if c {
                 println!("  {} {:<12} {}", "x".red().bold(), name.white(), desc.dimmed());
             } else {

@@ -214,27 +214,3 @@ impl super::Provider for Perplexity {
     }
 }
 
-#[allow(dead_code)]
-impl Perplexity {
-    /// Academic search using search_mode: "academic"
-    pub async fn search_academic(
-        &self,
-        query: &str,
-        _count: usize,
-        opts: &SearchOpts,
-    ) -> Result<Vec<SearchResult>, SearchError> {
-        self.do_search(query, opts, "sonar-pro", None, Some("academic"))
-            .await
-    }
-
-    /// Deep research using sonar-reasoning-pro for complex queries
-    pub async fn search_deep(
-        &self,
-        query: &str,
-        _count: usize,
-        opts: &SearchOpts,
-    ) -> Result<Vec<SearchResult>, SearchError> {
-        self.do_search(query, opts, "sonar-reasoning-pro", None, None)
-            .await
-    }
-}

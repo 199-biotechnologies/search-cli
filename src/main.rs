@@ -147,6 +147,26 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 }
             }
 
+            // Validate provider names early
+            if let Some(ref providers) = args.providers {
+                const KNOWN: &[&str] = &[
+                    "brave", "serper", "exa", "jina", "firecrawl", "tavily",
+                    "serpapi", "perplexity", "browserless", "stealth", "xai",
+                ];
+                for p in providers {
+                    if !KNOWN.iter().any(|k| k.eq_ignore_ascii_case(p)) {
+                        let err = errors::SearchError::Config(format!(
+                            "Unknown provider '{}'. Valid: {}", p, KNOWN.join(", ")
+                        ));
+                        match *format {
+                            OutputFormat::Json => output::json::render_error(&err),
+                            OutputFormat::Table => eprintln!("Error: {err}"),
+                        }
+                        return Ok(err.exit_code());
+                    }
+                }
+            }
+
             let count = args.count.unwrap_or(ctx.config.settings.count);
             let opts = types::SearchOpts {
                 include_domains: args.domain.unwrap_or_default(),
@@ -214,7 +234,12 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 OutputFormat::Table => output::table::render(&response),
             }
 
-            Ok(0)
+            // Exit non-zero when all providers failed (semantic exit codes)
+            if response.status == "all_providers_failed" {
+                Ok(1)
+            } else {
+                Ok(0)
+            }
         }
 
         Commands::Config { action } => {
@@ -257,6 +282,8 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                             "key": key,
                             "message": format!("Set {key}"),
                         }));
+                    } else {
+                        eprintln!("Set {key}");
                     }
                 }
                 ConfigAction::Check => {
@@ -311,6 +338,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 "commands": ["search", "config show", "config set", "config check", "agent-info", "providers", "update"],
                 "modes": ["auto", "general", "news", "academic", "people", "deep", "extract", "similar", "scrape", "scholar", "patents", "images", "places", "social"],
                 "providers": providers_info,
+                "global_flags": ["--json", "--quiet", "--last", "--x"],
                 "env_prefix": "SEARCH_",
                 "config_path": config::config_path().to_string_lossy(),
                 "output_formats": ["json", "table"],
