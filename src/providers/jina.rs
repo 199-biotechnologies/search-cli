@@ -15,8 +15,8 @@ impl Jina {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.jina
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.jina, "JINA_API_KEY")
     }
 }
 
@@ -39,6 +39,7 @@ impl super::Provider for Jina {
         "jina"
     }
 
+    fn env_keys(&self) -> &[&'static str] { &["JINA_API_KEY", "SEARCH_KEYS_JINA"] }
     fn capabilities(&self) -> &[&'static str] {
         &["general", "extract"]
     }

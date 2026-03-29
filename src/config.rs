@@ -15,6 +15,8 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKeys {
     #[serde(default)]
+    pub parallel: String,
+    #[serde(default)]
     pub brave: String,
     #[serde(default)]
     pub serper: String,
@@ -55,6 +57,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             keys: ApiKeys {
+                parallel: String::new(),
                 brave: String::new(),
                 serper: String::new(),
                 exa: String::new(),
@@ -123,39 +126,35 @@ pub fn config_show(config: &AppConfig) {
         println!("Configuration ({})\n", config_path().display());
     }
 
-    let keys = [
-        ("brave", &config.keys.brave),
-        ("serper", &config.keys.serper),
-        ("exa", &config.keys.exa),
-        ("jina", &config.keys.jina),
-        ("firecrawl", &config.keys.firecrawl),
-        ("tavily", &config.keys.tavily),
-        ("serpapi", &config.keys.serpapi),
-        ("perplexity", &config.keys.perplexity),
-        ("browserless", &config.keys.browserless),
-        ("xai", &config.keys.xai),
+    use crate::providers;
+
+    let keys: &[(&str, &str, &str)] = &[
+        ("parallel",   &config.keys.parallel,   "PARALLEL_API_KEY"),
+        ("brave",      &config.keys.brave,      "BRAVE_API_KEY"),
+        ("serper",     &config.keys.serper,      "SERPER_API_KEY"),
+        ("exa",        &config.keys.exa,         "EXA_API_KEY"),
+        ("jina",       &config.keys.jina,        "JINA_API_KEY"),
+        ("firecrawl",  &config.keys.firecrawl,   "FIRECRAWL_API_KEY"),
+        ("tavily",     &config.keys.tavily,      "TAVILY_API_KEY"),
+        ("serpapi",    &config.keys.serpapi,      "SERPAPI_API_KEY"),
+        ("perplexity", &config.keys.perplexity,  "PERPLEXITY_API_KEY"),
+        ("browserless",&config.keys.browserless,  "BROWSERLESS_API_KEY"),
+        ("xai",        &config.keys.xai,         "XAI_API_KEY"),
     ];
 
-    // xAI also accepts XAI_API_KEY env var
-    let xai_env = std::env::var("XAI_API_KEY").unwrap_or_default();
-
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
-    for (name, key) in &keys {
-        let effective = if key.is_empty() && *name == "xai" && !xai_env.is_empty() {
-            &xai_env
-        } else {
-            key.as_str()
-        };
-        let masked = mask_key(effective);
+    for (name, config_val, env_var) in keys {
+        let effective = providers::resolve_key(config_val, env_var);
+        let masked = mask_key(&effective);
         if c {
             let val = if effective.is_empty() {
                 masked.red().to_string()
             } else {
                 masked.green().to_string()
             };
-            println!("    {:<10} {}", name.white(), val);
+            println!("    {:<12} {}", name.white(), val);
         } else {
-            println!("  {:<10} = {}", name, masked);
+            println!("  {:<12} = {}", name, masked);
         }
     }
 
@@ -215,29 +214,29 @@ pub fn config_check(config: &AppConfig) {
     use std::io::IsTerminal;
     let c = std::io::stdout().is_terminal();
 
-    let providers = [
-        ("brave", &config.keys.brave, "Web + News search"),
-        ("serper", &config.keys.serper, "Google SERP, Scholar, Patents, Images, Places"),
-        ("exa", &config.keys.exa, "Semantic search, People, Similar pages"),
-        ("jina", &config.keys.jina, "Web search + URL reader"),
-        ("firecrawl", &config.keys.firecrawl, "Web scraping + extraction"),
-        ("tavily", &config.keys.tavily, "General, News, Academic, Deep search"),
-        ("serpapi", &config.keys.serpapi, "80+ engines: Google, Bing, YouTube, Baidu, Scholar"),
-        ("perplexity", &config.keys.perplexity, "AI-powered answers with citations (Perplexity Sonar)"),
-        ("browserless", &config.keys.browserless, "Cloud browser for Cloudflare/JS-heavy pages"),
-        ("xai", &config.keys.xai, "X/Twitter social search via xAI Grok"),
-    ];
+    use crate::providers;
 
-    // xAI also accepts XAI_API_KEY env var (xAI's convention)
-    let xai_env = std::env::var("XAI_API_KEY").unwrap_or_default();
+    let all: &[(&str, &str, &str, &str)] = &[
+        ("parallel",    &config.keys.parallel,    "PARALLEL_API_KEY",    "Independent web index (Parallel AI)"),
+        ("brave",       &config.keys.brave,       "BRAVE_API_KEY",       "Web + News search"),
+        ("serper",      &config.keys.serper,       "SERPER_API_KEY",      "Google SERP, Scholar, Patents, Images, Places"),
+        ("exa",         &config.keys.exa,          "EXA_API_KEY",         "Semantic search, People, Similar pages"),
+        ("jina",        &config.keys.jina,         "JINA_API_KEY",        "Web search + URL reader"),
+        ("firecrawl",   &config.keys.firecrawl,    "FIRECRAWL_API_KEY",   "Web scraping + extraction"),
+        ("tavily",      &config.keys.tavily,       "TAVILY_API_KEY",      "General, News, Academic, Deep search"),
+        ("serpapi",     &config.keys.serpapi,       "SERPAPI_API_KEY",     "80+ engines: Google, Bing, YouTube, Baidu, Scholar"),
+        ("perplexity",  &config.keys.perplexity,   "PERPLEXITY_API_KEY",  "AI-powered answers with citations (Perplexity Sonar)"),
+        ("browserless", &config.keys.browserless,   "BROWSERLESS_API_KEY", "Cloud browser for Cloudflare/JS-heavy pages"),
+        ("xai",         &config.keys.xai,          "XAI_API_KEY",         "X/Twitter social search via xAI Grok"),
+    ];
 
     if c {
         println!("\n{}  Provider Health Check\n", "search".bold().cyan());
     }
 
     let mut configured = 0;
-    for (name, key, desc) in &providers {
-        let is_configured = !key.is_empty() || (*name == "xai" && !xai_env.is_empty());
+    for (name, config_val, env_var, desc) in all {
+        let is_configured = !providers::resolve_key(config_val, env_var).is_empty();
         if !is_configured {
             if c {
                 println!("  {} {:<12} {}", "x".red().bold(), name.white(), desc.dimmed());
@@ -258,22 +257,22 @@ pub fn config_check(config: &AppConfig) {
     if configured == 0 {
         if c {
             println!("  {} No providers configured.\n", "!".yellow().bold());
-            println!("  Set API keys via config file or environment:");
+            println!("  Set API keys via environment or config:");
+            println!("    {} export BRAVE_API_KEY=YOUR_KEY", "$".dimmed());
             println!("    {} search config set keys.brave YOUR_KEY", "$".dimmed());
-            println!("    {} export SEARCH_KEYS_BRAVE=YOUR_KEY", "$".dimmed());
         } else {
             println!("  No providers configured. Set API keys via:");
+            println!("    export BRAVE_API_KEY=<YOUR_KEY>");
             println!("    search config set keys.brave <YOUR_KEY>");
-            println!("    export SEARCH_KEYS_BRAVE=<YOUR_KEY>");
         }
     } else if c {
         println!(
             "  {}/{} providers ready",
             configured.to_string().green().bold(),
-            providers.len()
+            all.len()
         );
     } else {
-        println!("  {configured}/{} providers configured", providers.len());
+        println!("  {configured}/{} providers configured", all.len());
     }
     println!();
 }

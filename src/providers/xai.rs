@@ -17,13 +17,7 @@ impl Xai {
     }
 
     fn api_key(&self) -> String {
-        let key = &self.ctx.config.keys.xai;
-        if key.is_empty() {
-            // Fallback to XAI_API_KEY env var (xAI's convention)
-            std::env::var("XAI_API_KEY").unwrap_or_default()
-        } else {
-            key.clone()
-        }
+        super::resolve_key(&self.ctx.config.keys.xai, "XAI_API_KEY")
     }
 
     async fn call_responses_api(
@@ -274,6 +268,7 @@ impl super::Provider for Xai {
     fn name(&self) -> &'static str {
         "xai"
     }
+    fn env_keys(&self) -> &[&'static str] { &["XAI_API_KEY", "SEARCH_KEYS_XAI"] }
     fn capabilities(&self) -> &[&'static str] {
         &["social"]
     }

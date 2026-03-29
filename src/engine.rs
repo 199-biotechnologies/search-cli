@@ -12,10 +12,10 @@ use tokio::time::timeout;
 /// Which providers to query for each mode
 fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
     match mode {
-        Mode::Auto | Mode::General => &["brave", "serper", "exa", "jina", "tavily", "perplexity"],
-        Mode::News => &["brave", "serper", "tavily", "perplexity"],
+        Mode::Auto | Mode::General => &["parallel", "brave", "serper", "exa", "jina", "tavily", "perplexity"],
+        Mode::News => &["parallel", "brave", "serper", "tavily", "perplexity"],
         Mode::Academic => &["exa", "serper", "tavily", "perplexity"],
-        Mode::Deep => &["brave", "exa", "serper", "tavily", "perplexity", "xai"],
+        Mode::Deep => &["parallel", "brave", "exa", "serper", "tavily", "perplexity", "xai"],
         Mode::Scholar => &["serper", "serpapi"],
         Mode::Patents => &["serper"],
         Mode::People => &["exa"],

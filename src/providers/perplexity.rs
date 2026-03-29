@@ -16,8 +16,8 @@ impl Perplexity {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.perplexity
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.perplexity, "PERPLEXITY_API_KEY")
     }
 
     async fn do_search(
@@ -181,6 +181,7 @@ impl super::Provider for Perplexity {
     fn name(&self) -> &'static str {
         "perplexity"
     }
+    fn env_keys(&self) -> &[&'static str] { &["PERPLEXITY_API_KEY", "SEARCH_KEYS_PERPLEXITY"] }
     fn capabilities(&self) -> &[&'static str] {
         &["general", "news", "academic", "deep"]
     }

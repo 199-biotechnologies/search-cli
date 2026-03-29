@@ -3,6 +3,7 @@ pub mod browserless;
 pub mod exa;
 pub mod firecrawl;
 pub mod jina;
+pub mod parallel;
 pub mod perplexity;
 pub mod serpapi;
 pub mod serper;
@@ -33,11 +34,21 @@ where
     .await
 }
 
+/// Check config key first, then fall back to standard env var.
+pub fn resolve_key(config_value: &str, env_var: &str) -> String {
+    if !config_value.is_empty() {
+        return config_value.to_string();
+    }
+    std::env::var(env_var).unwrap_or_default()
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn name(&self) -> &'static str;
     fn capabilities(&self) -> &[&'static str];
     fn is_configured(&self) -> bool;
+    /// Standard env var names accepted by this provider (e.g. BRAVE_API_KEY).
+    fn env_keys(&self) -> &[&'static str];
     fn timeout(&self) -> Duration {
         Duration::from_secs(10)
     }
@@ -49,6 +60,7 @@ pub trait Provider: Send + Sync {
 
 pub fn build_providers(ctx: &Arc<AppContext>) -> Vec<Box<dyn Provider>> {
     vec![
+        Box::new(parallel::Parallel::new(ctx.clone())),
         Box::new(brave::Brave::new(ctx.clone())),
         Box::new(serper::Serper::new(ctx.clone())),
         Box::new(exa::Exa::new(ctx.clone())),

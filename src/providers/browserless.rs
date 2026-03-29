@@ -14,8 +14,8 @@ impl Browserless {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.browserless
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.browserless, "BROWSERLESS_API_KEY")
     }
 
     /// Scrape a URL using Browserless cloud browser (handles Cloudflare, JS rendering)
@@ -123,6 +123,7 @@ impl super::Provider for Browserless {
         "browserless"
     }
 
+    fn env_keys(&self) -> &[&'static str] { &["BROWSERLESS_API_KEY", "SEARCH_KEYS_BROWSERLESS"] }
     fn capabilities(&self) -> &[&'static str] {
         &["scrape", "extract"]
     }

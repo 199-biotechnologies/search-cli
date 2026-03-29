@@ -27,6 +27,7 @@ async fn main() {
     // Priming the OS DNS cache for the most likely API domains.
     tokio::spawn(async {
         let domains = [
+            "api.parallel.ai:443",
             "api.search.brave.com:443",
             "google.serper.dev:443",
             "api.exa.ai:443",
@@ -150,7 +151,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
             // Validate provider names early
             if let Some(ref providers) = args.providers {
                 const KNOWN: &[&str] = &[
-                    "brave", "serper", "exa", "jina", "firecrawl", "tavily",
+                    "parallel", "brave", "serper", "exa", "jina", "firecrawl", "tavily",
                     "serpapi", "perplexity", "browserless", "stealth", "xai",
                 ];
                 for p in providers {
@@ -288,18 +289,11 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 }
                 ConfigAction::Check => {
                     if matches!(*format, OutputFormat::Json) {
-                        let all = [
-                            ("brave", !ctx.config.keys.brave.is_empty()),
-                            ("serper", !ctx.config.keys.serper.is_empty()),
-                            ("exa", !ctx.config.keys.exa.is_empty()),
-                            ("jina", !ctx.config.keys.jina.is_empty()),
-                            ("firecrawl", !ctx.config.keys.firecrawl.is_empty()),
-                            ("tavily", !ctx.config.keys.tavily.is_empty()),
-                            ("serpapi", !ctx.config.keys.serpapi.is_empty()),
-                            ("perplexity", !ctx.config.keys.perplexity.is_empty()),
-                            ("browserless", !ctx.config.keys.browserless.is_empty()),
-                            ("xai", !ctx.config.keys.xai.is_empty()),
-                        ];
+                        let all_providers = providers::build_providers(&ctx);
+                        let all: Vec<(&str, bool)> = all_providers
+                            .iter()
+                            .map(|p| (p.name(), p.is_configured()))
+                            .collect();
                         let configured: Vec<&str> = all.iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
                         let unconfigured: Vec<&str> = all.iter().filter(|(_, v)| !v).map(|(k, _)| *k).collect();
                         let total = all.len();
@@ -328,6 +322,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                         "name": p.name(),
                         "configured": p.is_configured(),
                         "capabilities": p.capabilities(),
+                        "env_keys": p.env_keys(),
                     })
                 })
                 .collect();

@@ -16,8 +16,8 @@ impl Exa {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.exa
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.exa, "EXA_API_KEY")
     }
 
     async fn post_api(&self, path: &str, body: serde_json::Value) -> Result<ExaResponse, SearchError> {
@@ -32,7 +32,7 @@ impl Exa {
         super::retry_request(|| async {
             let resp = client
                 .post(&url)
-                .header("x-api-key", api_key)
+                .header("x-api-key", api_key.as_str())
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
@@ -157,6 +157,7 @@ fn build_search_body(query: &str, count: usize, opts: &SearchOpts) -> serde_json
 impl super::Provider for Exa {
     fn name(&self) -> &'static str { "exa" }
     fn capabilities(&self) -> &[&'static str] { &["general", "academic", "people", "similar", "deep"] }
+    fn env_keys(&self) -> &[&'static str] { &["EXA_API_KEY", "SEARCH_KEYS_EXA"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
     fn timeout(&self) -> Duration { Duration::from_secs(15) }
 

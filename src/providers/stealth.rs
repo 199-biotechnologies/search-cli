@@ -195,6 +195,10 @@ impl super::Provider for Stealth {
         &["scrape", "extract"]
     }
 
+    fn env_keys(&self) -> &[&'static str] {
+        &[] // No API key needed
+    }
+
     fn is_configured(&self) -> bool {
         true // No API key needed — local scraper
     }

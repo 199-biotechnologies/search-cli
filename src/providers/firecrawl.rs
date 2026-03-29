@@ -16,8 +16,8 @@ impl Firecrawl {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.firecrawl
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.firecrawl, "FIRECRAWL_API_KEY")
     }
 }
 
@@ -45,6 +45,7 @@ impl super::Provider for Firecrawl {
         "firecrawl"
     }
 
+    fn env_keys(&self) -> &[&'static str] { &["FIRECRAWL_API_KEY", "SEARCH_KEYS_FIRECRAWL"] }
     fn capabilities(&self) -> &[&'static str] {
         &["general", "scrape", "extract"]
     }

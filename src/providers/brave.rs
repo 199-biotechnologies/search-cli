@@ -15,8 +15,8 @@ impl Brave {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.brave
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.brave, "BRAVE_API_KEY")
     }
 }
 
@@ -85,6 +85,10 @@ impl super::Provider for Brave {
         &["general", "news", "deep"]
     }
 
+    fn env_keys(&self) -> &[&'static str] {
+        &["BRAVE_API_KEY", "SEARCH_KEYS_BRAVE"]
+    }
+
     fn is_configured(&self) -> bool {
         !self.api_key().is_empty()
     }
@@ -107,7 +111,7 @@ impl super::Provider for Brave {
         super::retry_request(|| async {
             let mut req = client
                 .get("https://api.search.brave.com/res/v1/web/search")
-                .header("X-Subscription-Token", api_key)
+                .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[("q", q.as_str()), ("count", &count_str), ("extra_snippets", "true")]);
 
@@ -180,7 +184,7 @@ impl super::Provider for Brave {
         super::retry_request(|| async {
             let mut req = client
                 .get("https://api.search.brave.com/res/v1/news/search")
-                .header("X-Subscription-Token", api_key)
+                .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[("q", q.as_str()), ("count", &count_str)]);
 
@@ -244,7 +248,7 @@ impl Brave {
         super::retry_request(|| async {
             let mut req = client
                 .get("https://api.search.brave.com/res/v1/llm/context")
-                .header("X-Subscription-Token", api_key)
+                .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[
                     ("q", q.as_str()),

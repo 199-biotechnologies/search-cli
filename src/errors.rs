@@ -62,7 +62,7 @@ impl SearchError {
     pub fn suggestion(&self) -> Option<String> {
         match self {
             Self::AuthMissing { provider } => Some(format!(
-                "Set SEARCH_KEYS_{} env var or run: search config set keys.{} YOUR_KEY",
+                "Set {}_API_KEY env var or run: search config set keys.{} YOUR_KEY",
                 provider.to_uppercase(),
                 provider
             )),

@@ -15,8 +15,8 @@ impl Serper {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.serper
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.serper, "SERPER_API_KEY")
     }
 
     async fn query_endpoint(
@@ -52,7 +52,7 @@ impl Serper {
         super::retry_request(|| async {
             let resp = client
                 .post(&url)
-                .header("X-API-KEY", api_key)
+                .header("X-API-KEY", api_key.as_str())
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
@@ -122,6 +122,7 @@ fn parse_organic(body: &serde_json::Value, source: &str) -> Vec<SearchResult> {
 impl super::Provider for Serper {
     fn name(&self) -> &'static str { "serper" }
     fn capabilities(&self) -> &[&'static str] { &["general", "news", "scholar", "patents", "images", "places"] }
+    fn env_keys(&self) -> &[&'static str] { &["SERPER_API_KEY", "SEARCH_KEYS_SERPER"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
     fn timeout(&self) -> Duration { Duration::from_secs(10) }
 

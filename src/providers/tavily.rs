@@ -16,8 +16,8 @@ impl Tavily {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.tavily
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.tavily, "TAVILY_API_KEY")
     }
 
     async fn do_search(
@@ -122,6 +122,7 @@ struct TavilyResult {
 impl super::Provider for Tavily {
     fn name(&self) -> &'static str { "tavily" }
     fn capabilities(&self) -> &[&'static str] { &["general", "news", "academic", "deep"] }
+    fn env_keys(&self) -> &[&'static str] { &["TAVILY_API_KEY", "SEARCH_KEYS_TAVILY"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
     fn timeout(&self) -> Duration { Duration::from_secs(15) }
 

@@ -14,8 +14,8 @@ impl SerpApi {
         Self { ctx }
     }
 
-    fn api_key(&self) -> &str {
-        &self.ctx.config.keys.serpapi
+    fn api_key(&self) -> String {
+        super::resolve_key(&self.ctx.config.keys.serpapi, "SERPAPI_API_KEY")
     }
 
     pub fn is_configured(&self) -> bool {
@@ -152,6 +152,7 @@ impl super::Provider for SerpApi {
     fn name(&self) -> &'static str {
         "serpapi"
     }
+    fn env_keys(&self) -> &[&'static str] { &["SERPAPI_API_KEY", "SEARCH_KEYS_SERPAPI"] }
     fn capabilities(&self) -> &[&'static str] {
         &["general", "news", "scholar", "images"]
     }
