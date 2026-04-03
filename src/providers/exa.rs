@@ -179,7 +179,7 @@ impl Exa {
     pub async fn search_people(&self, query: &str, count: usize) -> Result<Vec<SearchResult>, SearchError> {
         let body = json!({
             "query": query, "numResults": count, "type": "auto",
-            "category": "linkedin profile", "contents": { "text": true }
+            "category": "people", "contents": { "text": true }
         });
         let resp = self.post_api("search", body).await?;
         Ok(to_results(resp, "exa_people"))
