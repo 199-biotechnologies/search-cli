@@ -9,6 +9,7 @@ mod logging;
 mod output;
 mod providers;
 mod types;
+mod verify;
 
 use clap::Parser;
 use cli::{Cli, Commands, ConfigAction};
@@ -330,7 +331,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
             let info = serde_json::json!({
                 "name": "search",
                 "version": env!("CARGO_PKG_VERSION"),
-                "commands": ["search", "config show", "config set", "config check", "agent-info", "providers", "update"],
+                "commands": ["search", "verify", "config show", "config set", "config check", "agent-info", "providers", "update"],
                 "modes": ["auto", "general", "news", "academic", "people", "deep", "extract", "similar", "scrape", "scholar", "patents", "images", "places", "social"],
                 "providers": providers_info,
                 "global_flags": ["--json", "--quiet", "--last", "--x"],
@@ -338,6 +339,17 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 "config_path": config::config_path().to_string_lossy(),
                 "output_formats": ["json", "table"],
                 "auto_json_when_piped": true,
+                "verify": {
+                    "description": "Check if email addresses exist via SMTP without sending mail. No API key required.",
+                    "usage": "search verify <email> [<email>...] [-f <file>] [--json]",
+                    "verdicts": ["valid", "invalid", "catch_all", "unreachable", "timeout", "syntax_error"],
+                    "examples": [
+                        "search verify alice@stripe.com",
+                        "search verify alice@stripe.com bob@gucci.com --json",
+                        "search verify -f emails.txt"
+                    ],
+                    "notes": "No API key required. Uses direct SMTP. catch_all means domain accepts all addresses — email format likely correct but unverifiable. is_disposable flags throwaway email services."
+                },
             });
 
             output::json::render_value(&info);
@@ -379,6 +391,64 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                     output::table::render_providers(&provider_info);
                 }
             }
+            Ok(0)
+        }
+
+        Commands::Verify(args) => {
+            let mut emails: Vec<String> = args.emails;
+            if let Some(ref path) = args.file {
+                let content = if path == "-" {
+                    use std::io::Read;
+                    let mut buf = String::new();
+                    std::io::stdin().read_to_string(&mut buf)?;
+                    buf
+                } else {
+                    std::fs::read_to_string(path)?
+                };
+                emails.extend(
+                    content.lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty() && l.contains('@'))
+                );
+            }
+
+            if emails.is_empty() {
+                let err = errors::SearchError::Config(
+                    "No email addresses provided. Usage: search verify user@example.com".into(),
+                );
+                match *format {
+                    OutputFormat::Json => output::json::render_error(&err),
+                    OutputFormat::Table => eprintln!("Error: {err}"),
+                }
+                return Ok(2);
+            }
+
+            let start = std::time::Instant::now();
+            let results = verify::verify_emails(&emails).await;
+            let elapsed = start.elapsed().as_millis();
+
+            let valid_count = results.iter().filter(|r| r.verdict == "valid").count();
+            let invalid_count = results.iter().filter(|r| r.verdict == "invalid").count();
+            let catch_all_count = results.iter().filter(|r| r.verdict == "catch_all").count();
+
+            let response = serde_json::json!({
+                "version": "1",
+                "status": "success",
+                "results": results,
+                "metadata": {
+                    "elapsed_ms": elapsed,
+                    "verified_count": results.len(),
+                    "valid_count": valid_count,
+                    "invalid_count": invalid_count,
+                    "catch_all_count": catch_all_count,
+                }
+            });
+
+            match *format {
+                OutputFormat::Json => output::json::render_value(&response),
+                OutputFormat::Table => verify::render_table(&results),
+            }
+
             Ok(0)
         }
 

@@ -74,12 +74,25 @@ pub enum Commands {
     /// List all providers with status and capabilities
     Providers,
 
+    /// Verify if email addresses exist via SMTP (no API key needed)
+    Verify(VerifyArgs),
+
     /// Check for updates or self-update
     Update {
         /// Only check, don't install
         #[arg(long)]
         check: bool,
     },
+}
+
+#[derive(Parser)]
+pub struct VerifyArgs {
+    /// Email addresses to verify
+    pub emails: Vec<String>,
+
+    /// Read emails from file (one per line, use - for stdin)
+    #[arg(short, long)]
+    pub file: Option<String>,
 }
 
 #[derive(Parser)]
