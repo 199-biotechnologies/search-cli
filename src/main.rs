@@ -12,20 +12,34 @@ mod types;
 mod verify;
 
 use clap::Parser;
-use cli::{Cli, Commands, ConfigAction};
+use cli::{Cli, Commands, ConfigAction, SkillAction};
 use config::{config_check, config_set, config_show, load_config};
 use context::AppContext;
-use output::OutputFormat;
+use output::{Ctx, OutputFormat};
 use std::sync::Arc;
 use tokio::net::lookup_host;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// Pre-scan argv for --json before clap parses. Ensures --json works on
+/// help, version, and parse-error paths where Cli hasn't been populated.
+fn has_json_flag() -> bool {
+    let mut past_dashdash = false;
+    for arg in std::env::args_os().skip(1) {
+        if arg == "--" {
+            past_dashdash = true;
+        }
+        if !past_dashdash && arg == "--json" {
+            return true;
+        }
+    }
+    false
+}
+
 #[tokio::main]
 async fn main() {
     // 1. Pre-emptive DNS resolution (starts immediately in background)
-    // Priming the OS DNS cache for the most likely API domains.
     tokio::spawn(async {
         let domains = [
             "api.parallel.ai:443",
@@ -44,11 +58,65 @@ async fn main() {
     // 2. Start loading config in parallel with CLI parsing
     let config_handle = tokio::task::spawn_blocking(load_config);
 
-    // 3. CLI Parsing (fast, but we want to overlap it with I/O)
-    let cli = Cli::parse();
-    let format = OutputFormat::detect(cli.json);
+    // 3. Pre-scan --json before clap parses
+    let json_flag = has_json_flag();
 
-    // 4. Wait for config
+    // 4. CLI Parsing — use try_parse so we own error handling
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            if matches!(
+                e.kind(),
+                clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayVersion
+            ) {
+                let format = OutputFormat::detect(json_flag);
+                match format {
+                    OutputFormat::Json => {
+                        let envelope = serde_json::json!({
+                            "version": "1",
+                            "status": "success",
+                            "data": { "usage": e.to_string().trim_end() },
+                        });
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&envelope).unwrap()
+                        );
+                        std::process::exit(0);
+                    }
+                    OutputFormat::Table => e.exit(),
+                }
+            }
+
+            // Parse errors — we own the exit code, always 3.
+            let format = OutputFormat::detect(json_flag);
+            match format {
+                OutputFormat::Json => {
+                    let envelope = serde_json::json!({
+                        "version": "1",
+                        "status": "error",
+                        "error": {
+                            "code": "invalid_input",
+                            "message": e.to_string(),
+                            "suggestion": "Check arguments with: search --help",
+                        },
+                    });
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string_pretty(&envelope).unwrap()
+                    );
+                }
+                OutputFormat::Table => {
+                    eprint!("{e}");
+                }
+            }
+            std::process::exit(3);
+        }
+    };
+
+    let ctx = Ctx::new(cli.json, cli.quiet);
+
+    // 5. Wait for config
     let config = match config_handle.await.unwrap() {
         Ok(c) => c,
         Err(e) => {
@@ -57,13 +125,12 @@ async fn main() {
         }
     };
 
-    let ctx = Arc::new(AppContext::new(config));
+    let app = Arc::new(AppContext::new(config));
 
-    // 5. Pre-emptive TLS Handshake (Unconventional: Race to the wire)
-    // If this is a search command, start Warming up TLS sessions for the "Big 3".
+    // 6. Pre-emptive TLS Handshake
     let is_search = cli.command.is_none() || matches!(cli.command, Some(Commands::Search(_)));
     if is_search && !cli.last {
-        let ctx_c = ctx.clone();
+        let app_c = app.clone();
         tokio::spawn(async move {
             let urls = [
                 "https://api.search.brave.com/res/v1/web/search",
@@ -71,19 +138,18 @@ async fn main() {
                 "https://api.exa.ai/search",
             ];
             for url in urls {
-                // Send a HEAD request to trigger TLS handshake + connection pooling.
-                // We don't care about the result, just want the connection established.
-                let _ = ctx_c.client.head(url).send().await;
+                let _ = app_c.client.head(url).send().await;
             }
         });
     }
 
-    let exit_code = match run(cli, &format, ctx).await {
+    let exit_code = match run(cli, &ctx, app).await {
         Ok(code) => code,
         Err(e) => {
-            match format {
-                OutputFormat::Json => output::json::render_error(&e),
-                OutputFormat::Table => eprintln!("Error: {e}"),
+            if ctx.is_json() {
+                output::json::render_error(&e);
+            } else {
+                eprintln!("Error: {e}");
             }
             e.exit_code()
         }
@@ -92,7 +158,7 @@ async fn main() {
     std::process::exit(exit_code);
 }
 
-async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i32, errors::SearchError> {
+async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::SearchError> {
     // Handle bare `search "query"` without subcommand
     let command = if let Some(cmd) = cli.command {
         cmd
@@ -119,8 +185,19 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
         })
     } else {
         use clap::CommandFactory;
-        Cli::command().print_help().ok();
-        println!();
+        if ctx.is_json() {
+            let mut buf = Vec::new();
+            Cli::command().write_long_help(&mut buf).ok();
+            let envelope = serde_json::json!({
+                "version": "1",
+                "status": "success",
+                "data": { "usage": String::from_utf8_lossy(&buf).trim_end() },
+            });
+            println!("{}", serde_json::to_string_pretty(&envelope).unwrap());
+        } else {
+            Cli::command().print_help().ok();
+            println!();
+        }
         return Ok(0);
     };
 
@@ -134,16 +211,18 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
 
             if cli.last {
                 if let Some(cached) = cache::load_last() {
-                    match *format {
-                        OutputFormat::Json => output::json::render(&cached),
-                        OutputFormat::Table => output::table::render(&cached),
+                    if ctx.is_json() {
+                        output::json::render(&cached);
+                    } else if !ctx.suppress_human() {
+                        output::table::render(&cached);
                     }
                     return Ok(0);
                 } else {
                     let err = errors::SearchError::Config("No cached results found. Run a search first.".into());
-                    match *format {
-                        OutputFormat::Json => output::json::render_error(&err),
-                        OutputFormat::Table => eprintln!("No cached results found. Run a search first."),
+                    if ctx.is_json() {
+                        output::json::render_error(&err);
+                    } else {
+                        eprintln!("No cached results found. Run a search first.");
                     }
                     return Ok(1);
                 }
@@ -160,23 +239,24 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                         let err = errors::SearchError::Config(format!(
                             "Unknown provider '{}'. Valid: {}", p, KNOWN.join(", ")
                         ));
-                        match *format {
-                            OutputFormat::Json => output::json::render_error(&err),
-                            OutputFormat::Table => eprintln!("Error: {err}"),
+                        if ctx.is_json() {
+                            output::json::render_error(&err);
+                        } else {
+                            eprintln!("Error: {err}");
                         }
                         return Ok(err.exit_code());
                     }
                 }
             }
 
-            let count = args.count.unwrap_or(ctx.config.settings.count);
+            let count = args.count.unwrap_or(app.config.settings.count);
             let opts = types::SearchOpts {
                 include_domains: args.domain.unwrap_or_default(),
                 exclude_domains: args.exclude_domain.unwrap_or_default(),
                 freshness: args.freshness,
             };
 
-            // Check query cache (5min TTL) — skip if filters or provider selection is active
+            // Check query cache (5min TTL)
             let mode_str = args.mode.to_string();
             if args.providers.is_none()
                 && opts.include_domains.is_empty()
@@ -184,16 +264,17 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 && opts.freshness.is_none()
             {
                 if let Some(cached) = cache::load_query(&args.query, &mode_str) {
-                    match *format {
-                        OutputFormat::Json => output::json::render(&cached),
-                        OutputFormat::Table => output::table::render(&cached),
+                    if ctx.is_json() {
+                        output::json::render(&cached);
+                    } else if !ctx.suppress_human() {
+                        output::table::render(&cached);
                     }
                     return Ok(0);
                 }
             }
 
-            // Show spinner for human output
-            let spinner = if matches!(*format, OutputFormat::Table) && !cli.quiet {
+            // Show spinner for human output (suppressed by --quiet)
+            let spinner = if !ctx.is_json() && !ctx.quiet {
                 let sp = indicatif::ProgressBar::new_spinner();
                 sp.set_style(
                     indicatif::ProgressStyle::default_spinner()
@@ -219,7 +300,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
             };
 
             let response =
-                engine::run(ctx, &args.query, args.mode, count, &args.providers, &opts).await;
+                engine::run(app, &args.query, args.mode, count, &args.providers, &opts).await;
 
             if let Some(sp) = spinner {
                 sp.finish_and_clear();
@@ -231,12 +312,12 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
             cache::save_query(&args.query, &mode_str, &response);
             logging::log_search(&response);
 
-            match *format {
-                OutputFormat::Json => output::json::render(&response),
-                OutputFormat::Table => output::table::render(&response),
+            if ctx.is_json() {
+                output::json::render(&response);
+            } else if !ctx.suppress_human() {
+                output::table::render(&response);
             }
 
-            // Exit non-zero when all providers failed (semantic exit codes)
             if response.status == "all_providers_failed" {
                 Ok(1)
             } else {
@@ -247,50 +328,50 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
         Commands::Config { action } => {
             match action {
                 ConfigAction::Show => {
-                    if matches!(*format, OutputFormat::Json) {
+                    if ctx.is_json() {
                         let configured: Vec<&str> = [
-                            ("brave", !ctx.config.keys.brave.is_empty()),
-                            ("serper", !ctx.config.keys.serper.is_empty()),
-                            ("exa", !ctx.config.keys.exa.is_empty()),
-                            ("jina", !ctx.config.keys.jina.is_empty()),
-                            ("firecrawl", !ctx.config.keys.firecrawl.is_empty()),
-                            ("tavily", !ctx.config.keys.tavily.is_empty()),
-                            ("serpapi", !ctx.config.keys.serpapi.is_empty()),
-                            ("perplexity", !ctx.config.keys.perplexity.is_empty()),
-                            ("browserless", !ctx.config.keys.browserless.is_empty()),
-                            ("xai", !ctx.config.keys.xai.is_empty()),
+                            ("brave", !app.config.keys.brave.is_empty()),
+                            ("serper", !app.config.keys.serper.is_empty()),
+                            ("exa", !app.config.keys.exa.is_empty()),
+                            ("jina", !app.config.keys.jina.is_empty()),
+                            ("firecrawl", !app.config.keys.firecrawl.is_empty()),
+                            ("tavily", !app.config.keys.tavily.is_empty()),
+                            ("serpapi", !app.config.keys.serpapi.is_empty()),
+                            ("perplexity", !app.config.keys.perplexity.is_empty()),
+                            ("browserless", !app.config.keys.browserless.is_empty()),
+                            ("xai", !app.config.keys.xai.is_empty()),
                         ].iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
                         let info = serde_json::json!({
                             "version": "1",
                             "status": "success",
                             "config_path": config::config_path().to_string_lossy(),
                             "settings": {
-                                "timeout": ctx.config.settings.timeout,
-                                "count": ctx.config.settings.count,
+                                "timeout": app.config.settings.timeout,
+                                "count": app.config.settings.count,
                             },
                             "providers_configured": configured,
                         });
                         output::json::render_value(&info);
-                    } else {
-                        config_show(&ctx.config);
+                    } else if !ctx.suppress_human() {
+                        config_show(&app.config);
                     }
                 }
                 ConfigAction::Set { key, value } => {
                     config_set(&key, &value)?;
-                    if matches!(*format, OutputFormat::Json) {
+                    if ctx.is_json() {
                         output::json::render_value(&serde_json::json!({
                             "version": "1",
                             "status": "success",
                             "key": key,
                             "message": format!("Set {key}"),
                         }));
-                    } else {
+                    } else if !ctx.suppress_human() {
                         eprintln!("Set {key}");
                     }
                 }
                 ConfigAction::Check => {
-                    if matches!(*format, OutputFormat::Json) {
-                        let all_providers = providers::build_providers(&ctx);
+                    if ctx.is_json() {
+                        let all_providers = providers::build_providers(&app);
                         let all: Vec<(&str, bool)> = all_providers
                             .iter()
                             .map(|p| (p.name(), p.is_configured()))
@@ -306,8 +387,27 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                             "configured": configured,
                             "unconfigured": unconfigured,
                         }));
-                    } else {
-                        config_check(&ctx.config);
+                    } else if !ctx.suppress_human() {
+                        config_check(&app.config);
+                    }
+                }
+                ConfigAction::Path => {
+                    let p = config::config_path();
+                    if ctx.is_json() {
+                        output::json::render_value(&serde_json::json!({
+                            "version": "1",
+                            "status": "success",
+                            "data": {
+                                "path": p.to_string_lossy(),
+                                "exists": p.exists(),
+                            },
+                        }));
+                    } else if !ctx.suppress_human() {
+                        println!("{}", p.display());
+                        if !p.exists() {
+                            use owo_colors::OwoColorize;
+                            println!("  {}", "(file does not exist, using defaults)".dimmed());
+                        }
                     }
                 }
             }
@@ -315,7 +415,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
         }
 
         Commands::AgentInfo => {
-            let all = providers::build_providers(&ctx);
+            let all = providers::build_providers(&app);
             let providers_info: Vec<serde_json::Value> = all
                 .iter()
                 .map(|p| {
@@ -331,33 +431,104 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
             let info = serde_json::json!({
                 "name": "search",
                 "version": env!("CARGO_PKG_VERSION"),
-                "commands": ["search", "verify", "config show", "config set", "config check", "agent-info", "providers", "update"],
-                "modes": ["auto", "general", "news", "academic", "people", "deep", "extract", "similar", "scrape", "scholar", "patents", "images", "places", "social"],
-                "providers": providers_info,
-                "global_flags": ["--json", "--quiet", "--last", "--x"],
-                "env_prefix": "SEARCH_",
-                "config_path": config::config_path().to_string_lossy(),
-                "output_formats": ["json", "table"],
-                "auto_json_when_piped": true,
-                "verify": {
-                    "description": "Check if email addresses exist via SMTP without sending mail. No API key required.",
-                    "usage": "search verify <email> [<email>...] [-f <file>] [--json]",
-                    "verdicts": ["valid", "invalid", "catch_all", "unreachable", "timeout", "syntax_error"],
-                    "examples": [
-                        "search verify alice@stripe.com",
-                        "search verify alice@stripe.com bob@gucci.com --json",
-                        "search verify -f emails.txt"
-                    ],
-                    "notes": "No API key required. Uses direct SMTP. catch_all means domain accepts all addresses — email format likely correct but unverifiable. is_disposable flags throwaway email services."
+                "description": env!("CARGO_PKG_DESCRIPTION"),
+                "commands": ["search", "verify", "config show", "config set", "config check", "config path", "agent-info", "providers", "skill install", "skill status", "update"],
+                "command_schemas": {
+                    "search": {
+                        "description": "Search across providers",
+                        "args": [
+                            {"name": "-q/--query", "type": "string", "required": true, "description": "Search query"},
+                        ],
+                        "options": [
+                            {"name": "-m/--mode", "type": "string", "required": false, "default": "auto",
+                             "values": ["auto","general","news","academic","people","deep","extract","similar","scrape","scholar","patents","images","places","social"],
+                             "description": "Search mode"},
+                            {"name": "-c/--count", "type": "integer", "required": false, "description": "Number of results"},
+                            {"name": "-p/--providers", "type": "string[]", "required": false,
+                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai"],
+                             "description": "Comma-separated provider list"},
+                            {"name": "-d/--domain", "type": "string[]", "required": false, "description": "Include only these domains"},
+                            {"name": "--exclude-domain", "type": "string[]", "required": false, "description": "Exclude these domains"},
+                            {"name": "-f/--freshness", "type": "string", "required": false,
+                             "values": ["day","week","month","year"],
+                             "description": "Freshness filter"},
+                        ]
+                    },
+                    "verify": {
+                        "description": "Check if email addresses exist via SMTP",
+                        "args": [
+                            {"name": "emails", "type": "string[]", "required": false, "description": "Email addresses to verify"},
+                        ],
+                        "options": [
+                            {"name": "-f/--file", "type": "string", "required": false, "description": "Read emails from file (use - for stdin)"},
+                        ],
+                        "verdicts": ["valid","invalid","catch_all","unreachable","timeout","syntax_error"],
+                        "notes": "No API key required. Uses direct SMTP."
+                    },
+                    "config show": {"description": "Display current configuration (keys masked)", "args": [], "options": []},
+                    "config set": {
+                        "description": "Set a configuration value",
+                        "args": [
+                            {"name": "key", "type": "string", "required": true, "description": "Config key (e.g. keys.brave, settings.timeout)"},
+                            {"name": "value", "type": "string", "required": true, "description": "Value to set"},
+                        ],
+                        "options": []
+                    },
+                    "config check": {"description": "Health-check which providers are configured", "args": [], "options": []},
+                    "config path": {"description": "Show configuration file path", "args": [], "options": []},
+                    "agent-info": {"description": "This manifest", "aliases": ["info"], "args": [], "options": []},
+                    "providers": {"description": "List all providers with status and capabilities", "args": [], "options": []},
+                    "skill install": {"description": "Install skill file to agent platforms", "args": [], "options": []},
+                    "skill status": {"description": "Check skill installation status", "args": [], "options": []},
+                    "update": {
+                        "description": "Self-update binary from GitHub Releases",
+                        "args": [],
+                        "options": [
+                            {"name": "--check", "type": "bool", "required": false, "default": false, "description": "Check only, don't install"}
+                        ]
+                    },
                 },
+                "global_flags": {
+                    "--json": {"type": "bool", "default": false, "description": "Force JSON output (auto-enabled when piped)"},
+                    "--quiet": {"type": "bool", "default": false, "description": "Suppress informational output"},
+                    "--last": {"type": "bool", "default": false, "description": "Replay last search from cache"},
+                    "--x": {"type": "bool", "default": false, "description": "Search X (Twitter) only"},
+                },
+                "exit_codes": {
+                    "0": "Success",
+                    "1": "Transient error (API, network) -- retry",
+                    "2": "Config/auth error -- fix setup",
+                    "3": "Bad input -- fix arguments",
+                    "4": "Rate limited -- wait and retry",
+                },
+                "envelope": {
+                    "version": "1",
+                    "success": "{ version, status, data|results }",
+                    "error": "{ version, status, error: { code, message, suggestion } }",
+                },
+                "providers": providers_info,
+                "modes": ["auto","general","news","academic","people","deep","extract","similar","scrape","scholar","patents","images","places","social"],
+                "config": {
+                    "path": config::config_path().to_string_lossy(),
+                    "env_prefix": "SEARCH_",
+                },
+                "auto_json_when_piped": true,
             });
 
             output::json::render_value(&info);
             Ok(0)
         }
 
+        Commands::Skill { action } => {
+            match action {
+                SkillAction::Install => cli::skill::install(ctx),
+                SkillAction::Status => cli::skill::status(ctx),
+            }
+            Ok(0)
+        }
+
         Commands::Providers => {
-            let all = providers::build_providers(&ctx);
+            let all = providers::build_providers(&app);
             let provider_info: Vec<(String, bool, Vec<String>)> = all
                 .iter()
                 .map(|p| {
@@ -369,27 +540,24 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 })
                 .collect();
 
-            match *format {
-                OutputFormat::Json => {
-                    let json: Vec<serde_json::Value> = provider_info
-                        .iter()
-                        .map(|(name, configured, caps)| {
-                            serde_json::json!({
-                                "name": name,
-                                "configured": configured,
-                                "capabilities": caps,
-                            })
+            if ctx.is_json() {
+                let json: Vec<serde_json::Value> = provider_info
+                    .iter()
+                    .map(|(name, configured, caps)| {
+                        serde_json::json!({
+                            "name": name,
+                            "configured": configured,
+                            "capabilities": caps,
                         })
-                        .collect();
-                    output::json::render_value(&serde_json::json!({
-                        "version": "1",
-                        "status": "success",
-                        "providers": json,
-                    }));
-                }
-                OutputFormat::Table => {
-                    output::table::render_providers(&provider_info);
-                }
+                    })
+                    .collect();
+                output::json::render_value(&serde_json::json!({
+                    "version": "1",
+                    "status": "success",
+                    "providers": json,
+                }));
+            } else if !ctx.suppress_human() {
+                output::table::render_providers(&provider_info);
             }
             Ok(0)
         }
@@ -416,9 +584,10 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 let err = errors::SearchError::Config(
                     "No email addresses provided. Usage: search verify user@example.com".into(),
                 );
-                match *format {
-                    OutputFormat::Json => output::json::render_error(&err),
-                    OutputFormat::Table => eprintln!("Error: {err}"),
+                if ctx.is_json() {
+                    output::json::render_error(&err);
+                } else {
+                    eprintln!("Error: {err}");
                 }
                 return Ok(2);
             }
@@ -444,9 +613,10 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                 }
             });
 
-            match *format {
-                OutputFormat::Json => output::json::render_value(&response),
-                OutputFormat::Table => verify::render_table(&results),
+            if ctx.is_json() {
+                output::json::render_value(&response);
+            } else if !ctx.suppress_human() {
+                verify::render_table(&results);
             }
 
             Ok(0)
@@ -465,7 +635,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                     Ok(updater) => match updater.get_latest_release() {
                         Ok(release) => {
                             let up_to_date = release.version == current;
-                            if matches!(*format, OutputFormat::Json) {
+                            if ctx.is_json() {
                                 output::json::render_value(&serde_json::json!({
                                     "version": "1",
                                     "status": "success",
@@ -473,16 +643,18 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                                     "latest_version": release.version,
                                     "update_available": !up_to_date,
                                 }));
-                            } else if !up_to_date {
-                                eprintln!("Current version: {current}");
-                                eprintln!("New version available: {}", release.version);
-                                eprintln!("Run `search update` to install");
-                            } else {
-                                eprintln!("Already up to date (v{current})");
+                            } else if !ctx.suppress_human() {
+                                if !up_to_date {
+                                    eprintln!("Current version: {current}");
+                                    eprintln!("New version available: {}", release.version);
+                                    eprintln!("Run `search update` to install");
+                                } else {
+                                    eprintln!("Already up to date (v{current})");
+                                }
                             }
                         }
                         Err(e) => {
-                            if matches!(*format, OutputFormat::Json) {
+                            if ctx.is_json() {
                                 let err = errors::SearchError::Api {
                                     provider: "github",
                                     code: "update_check_failed",
@@ -496,7 +668,7 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                         }
                     },
                     Err(e) => {
-                        if matches!(*format, OutputFormat::Json) {
+                        if ctx.is_json() {
                             let err = errors::SearchError::Config(format!("Update check failed: {e}"));
                             output::json::render_error(&err);
                         } else {
@@ -506,7 +678,9 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                     }
                 }
             } else {
-                eprintln!("Updating search from v{current}...");
+                if !ctx.suppress_human() {
+                    eprintln!("Updating search from v{current}...");
+                }
                 match self_update::backends::github::Update::configure()
                     .repo_owner("199-biotechnologies")
                     .repo_name("search-cli")
@@ -516,21 +690,23 @@ async fn run(cli: Cli, format: &OutputFormat, ctx: Arc<AppContext>) -> Result<i3
                     .and_then(|u| u.update())
                 {
                     Ok(status) => {
-                        if matches!(*format, OutputFormat::Json) {
+                        if ctx.is_json() {
                             output::json::render_value(&serde_json::json!({
                                 "version": "1",
                                 "status": "success",
                                 "updated": status.updated(),
                                 "version_installed": status.version(),
                             }));
-                        } else if status.updated() {
-                            eprintln!("Updated to v{}", status.version());
-                        } else {
-                            eprintln!("Already up to date (v{current})");
+                        } else if !ctx.suppress_human() {
+                            if status.updated() {
+                                eprintln!("Updated to v{}", status.version());
+                            } else {
+                                eprintln!("Already up to date (v{current})");
+                            }
                         }
                     }
                     Err(e) => {
-                        if matches!(*format, OutputFormat::Json) {
+                        if ctx.is_json() {
                             let err = errors::SearchError::Config(format!("Update failed: {e}"));
                             output::json::render_error(&err);
                         } else {

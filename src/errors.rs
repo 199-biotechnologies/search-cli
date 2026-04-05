@@ -39,7 +39,7 @@ impl SearchError {
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::Config(_) | Self::NoProviders(_) => 2,
-            Self::AuthMissing { .. } => 3,
+            Self::AuthMissing { .. } => 2,
             Self::RateLimited { .. } => 4,
             Self::Api { .. } | Self::Http(_) | Self::Rquest(_) => 1,
             Self::Json(_) | Self::Io(_) => 1,

@@ -73,8 +73,10 @@ fn test_agent_info_json() {
     assert_eq!(json["name"], "search");
     assert!(json["modes"].as_array().unwrap().len() >= 13);
     assert!(json["providers"].as_array().unwrap().len() >= 5);
-    assert_eq!(json["env_prefix"], "SEARCH_");
+    assert_eq!(json["config"]["env_prefix"], "SEARCH_");
     assert_eq!(json["auto_json_when_piped"], true);
+    assert!(json["command_schemas"].is_object());
+    assert!(json["exit_codes"].is_object());
 }
 
 #[test]

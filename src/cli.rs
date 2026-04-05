@@ -77,6 +77,12 @@ pub enum Commands {
     /// Verify if email addresses exist via SMTP (no API key needed)
     Verify(VerifyArgs),
 
+    /// Manage skill file installation for agent platforms
+    Skill {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
+
     /// Check for updates or self-update
     Update {
         /// Only check, don't install
@@ -139,4 +145,126 @@ pub enum ConfigAction {
     },
     /// Health-check which providers are configured and ready
     Check,
+    /// Show configuration file path
+    Path,
+}
+
+#[derive(Subcommand)]
+pub enum SkillAction {
+    /// Write skill file to all detected agent platforms
+    Install,
+    /// Check which platforms have the skill installed
+    Status,
+}
+
+pub mod skill {
+    use crate::output::Ctx;
+    use std::path::PathBuf;
+
+    const SKILL_CONTENT: &str = include_str!("../SKILL.md");
+
+    struct Target {
+        name: &'static str,
+        path: PathBuf,
+    }
+
+    fn home() -> PathBuf {
+        std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."))
+    }
+
+    fn targets() -> Vec<Target> {
+        let h = home();
+        vec![
+            Target { name: "Claude Code", path: h.join(".claude/skills/search") },
+            Target { name: "Codex CLI", path: h.join(".codex/skills/search") },
+            Target { name: "Gemini CLI", path: h.join(".gemini/skills/search") },
+        ]
+    }
+
+    pub fn install(ctx: &Ctx) {
+        let mut results = Vec::new();
+        for t in &targets() {
+            let skill_path = t.path.join("SKILL.md");
+            let status = if skill_path.exists()
+                && std::fs::read_to_string(&skill_path).is_ok_and(|c| c == SKILL_CONTENT)
+            {
+                "already_current"
+            } else {
+                if let Err(e) = std::fs::create_dir_all(&t.path) {
+                    eprintln!("  Failed {}: {e}", t.name);
+                    continue;
+                }
+                if let Err(e) = std::fs::write(&skill_path, SKILL_CONTENT) {
+                    eprintln!("  Failed {}: {e}", t.name);
+                    continue;
+                }
+                "installed"
+            };
+            results.push((t.name, skill_path.display().to_string(), status));
+        }
+
+        if ctx.is_json() {
+            let items: Vec<serde_json::Value> = results
+                .iter()
+                .map(|(name, path, status)| {
+                    serde_json::json!({"platform": name, "path": path, "status": status})
+                })
+                .collect();
+            crate::output::json::render_value(&serde_json::json!({
+                "version": "1",
+                "status": "success",
+                "data": items,
+            }));
+        } else if !ctx.suppress_human() {
+            use owo_colors::OwoColorize;
+            for (name, path, status) in &results {
+                let marker = if *status == "installed" { "+" } else { "=" };
+                println!(" {} {} -> {}", marker.green(), name.bold(), path.dimmed());
+            }
+        }
+    }
+
+    pub fn status(ctx: &Ctx) {
+        let mut results = Vec::new();
+        for t in &targets() {
+            let skill_path = t.path.join("SKILL.md");
+            let (installed, current) = if skill_path.exists() {
+                let current =
+                    std::fs::read_to_string(&skill_path).is_ok_and(|c| c == SKILL_CONTENT);
+                (true, current)
+            } else {
+                (false, false)
+            };
+            results.push((t.name, installed, current));
+        }
+
+        if ctx.is_json() {
+            let items: Vec<serde_json::Value> = results
+                .iter()
+                .map(|(name, installed, current)| {
+                    serde_json::json!({"platform": name, "installed": installed, "current": current})
+                })
+                .collect();
+            crate::output::json::render_value(&serde_json::json!({
+                "version": "1",
+                "status": "success",
+                "data": items,
+            }));
+        } else if !ctx.suppress_human() {
+            use owo_colors::OwoColorize;
+            for (name, installed, current) in &results {
+                let status = if *current {
+                    "current".green().to_string()
+                } else if *installed {
+                    "outdated".yellow().to_string()
+                } else {
+                    "not installed".red().to_string()
+                };
+                println!("  {} {}", name.bold(), status);
+            }
+        }
+    }
 }
