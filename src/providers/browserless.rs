@@ -62,25 +62,9 @@ impl Browserless {
         })
         .await?;
 
-        // resp is fully rendered HTML — extract with readability
-        let parsed_url = url::Url::parse(url).map_err(|e| SearchError::Api {
-            provider: "browserless",
-            code: "invalid_url",
-            message: format!("Invalid URL '{}': {}", url, e),
-        })?;
-
-        let mut cursor = std::io::Cursor::new(resp.as_bytes());
-        let (title, text) = match readability::extractor::extract(&mut cursor, &parsed_url) {
-            Ok(article) if !article.text.trim().is_empty() => {
-                let title = if article.title.is_empty() {
-                    url.to_string()
-                } else {
-                    article.title
-                };
-                (title, article.text)
-            }
-            _ => (url.to_string(), extract_text_simple(&resp)),
-        };
+        // Extract title + text from rendered HTML
+        let title = extract_title(&resp).unwrap_or_else(|| url.to_string());
+        let text = extract_text_simple(&resp);
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -100,6 +84,16 @@ impl Browserless {
             extra: None,
         }])
     }
+}
+
+/// Extract <title> from HTML using tl parser
+fn extract_title(html: &str) -> Option<String> {
+    let dom = tl::parse(html, tl::ParserOptions::default()).ok()?;
+    let parser = dom.parser();
+    let mut titles = dom.query_selector("title")?;
+    let node = titles.next()?.get(parser)?;
+    let text = node.inner_text(parser).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Simple HTML tag stripper
