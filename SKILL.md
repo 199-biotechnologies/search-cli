@@ -16,3 +16,10 @@ Quick examples:
 - `search search -q "AI news" -m news --json` — JSON output
 - `search verify alice@stripe.com --json` — email verification
 - `search --x "trending AI"` — X/Twitter search
+
+## Not suited for (use these instead)
+
+- **GitHub repos/code/issues/PRs** → use `gh` CLI (GitHub's own search API):
+  - `gh search repos "query" --language=rust --sort=stars --json fullName,description,stargazersCount,url`
+  - `gh search code "query" --language=go --json path,repository`
+  - `gh search issues "query" --state=open --json title,url,state`

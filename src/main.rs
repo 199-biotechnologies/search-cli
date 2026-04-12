@@ -513,6 +513,23 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                     "env_prefix": "SEARCH_",
                 },
                 "auto_json_when_piped": true,
+                "not_suited_for": {
+                    "github_repos": {
+                        "task": "Searching GitHub repositories, code, issues, or PRs",
+                        "use_instead": "gh search repos <query> [--language=<lang>] [--sort=stars] [--json fullName,description,stargazersCount,url]",
+                        "why": "search uses web crawl, not GitHub's API — no star counts, language filters, or structured repo metadata. gh queries GitHub's search API directly."
+                    },
+                    "github_code": {
+                        "task": "Searching code inside GitHub repositories",
+                        "use_instead": "gh search code <query> [--language=<lang>] [--json path,repository,textMatches]",
+                        "why": "GitHub code search requires GitHub's index, not web search."
+                    },
+                    "github_issues": {
+                        "task": "Searching GitHub issues or pull requests",
+                        "use_instead": "gh search issues <query> [--state=open] [--json title,url,state] or gh search prs <query>",
+                        "why": "GitHub issues/PRs require GitHub's API for state, labels, and metadata."
+                    }
+                },
             });
 
             output::json::render_value(&info);
