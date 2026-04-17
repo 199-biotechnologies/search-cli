@@ -5,7 +5,7 @@ Thanks for your interest in contributing. Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/199-biotechnologies/search-cli
+git clone https://github.com/paperfoot/search-cli
 cd search-cli
 cargo build
 cargo test

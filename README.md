@@ -6,7 +6,7 @@
 
 <br />
 
-[![Star this repo](https://img.shields.io/github/stars/199-biotechnologies/search-cli?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=yellow)](https://github.com/199-biotechnologies/search-cli/stargazers)
+[![Star this repo](https://img.shields.io/github/stars/paperfoot/search-cli?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=yellow)](https://github.com/paperfoot/search-cli/stargazers)
 &nbsp;&nbsp;
 [![Follow @longevityboris](https://img.shields.io/badge/Follow_%40longevityboris-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/longevityboris)
 
@@ -15,7 +15,7 @@
 [![Crates.io](https://img.shields.io/crates/v/agent-search?style=for-the-badge&logo=rust&logoColor=white&label=crates.io)](https://crates.io/crates/agent-search)
 [![Downloads](https://img.shields.io/crates/d/agent-search?style=for-the-badge&logo=rust&logoColor=white)](https://crates.io/crates/agent-search)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Build](https://img.shields.io/github/actions/workflow/status/199-biotechnologies/search-cli/ci.yml?style=for-the-badge&logo=github)](https://github.com/199-biotechnologies/search-cli/actions)
+[![Build](https://img.shields.io/github/actions/workflow/status/paperfoot/search-cli/ci.yml?style=for-the-badge&logo=github)](https://github.com/paperfoot/search-cli/actions)
 
 ---
 
@@ -52,12 +52,12 @@ brew install search-cli
 
 **One-liner (macOS / Linux):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/199-biotechnologies/search-cli/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/paperfoot/search-cli/master/install.sh | sh
 ```
 
 **From source:**
 ```bash
-cargo install --git https://github.com/199-biotechnologies/search-cli
+cargo install --git https://github.com/paperfoot/search-cli
 ```
 
 Binary size is ~6 MB. Startup is ~2 ms. Memory is ~5 MB. No Python, no Node, no Docker.
@@ -252,7 +252,7 @@ search update --check     # Check without installing
 ## Building from Source
 
 ```bash
-git clone https://github.com/199-biotechnologies/search-cli
+git clone https://github.com/paperfoot/search-cli
 cd search-cli
 cargo build --release
 # Binary at target/release/search
@@ -276,7 +276,7 @@ Built by [Boris Djordjevic](https://github.com/longevityboris) at [199 Biotechno
 
 **If this is useful to you:**
 
-[![Star this repo](https://img.shields.io/github/stars/199-biotechnologies/search-cli?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=yellow)](https://github.com/199-biotechnologies/search-cli/stargazers)
+[![Star this repo](https://img.shields.io/github/stars/paperfoot/search-cli?style=for-the-badge&logo=github&label=%E2%AD%90%20Star%20this%20repo&color=yellow)](https://github.com/paperfoot/search-cli/stargazers)
 &nbsp;&nbsp;
 [![Follow @longevityboris](https://img.shields.io/badge/Follow_%40longevityboris-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/longevityboris)
 
