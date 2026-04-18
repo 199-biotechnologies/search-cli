@@ -36,6 +36,8 @@ pub struct ApiKeys {
     pub browserless: String,
     #[serde(default)]
     pub xai: String,
+    #[serde(default)]
+    pub you: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,7 @@ impl Default for AppConfig {
                 perplexity: String::new(),
                 browserless: String::new(),
                 xai: String::new(),
+                you: String::new(),
             },
             settings: Settings {
                 timeout: default_timeout(),
@@ -140,6 +143,7 @@ pub fn config_show(config: &AppConfig) {
         ("perplexity", &config.keys.perplexity,  "PERPLEXITY_API_KEY"),
         ("browserless",&config.keys.browserless,  "BROWSERLESS_API_KEY"),
         ("xai",        &config.keys.xai,         "XAI_API_KEY"),
+        ("you",        &config.keys.you,         "YOU_API_KEY"),
     ];
 
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
@@ -228,6 +232,7 @@ pub fn config_check(config: &AppConfig) {
         ("perplexity",  &config.keys.perplexity,   "PERPLEXITY_API_KEY",  "AI-powered answers with citations (Perplexity Sonar)"),
         ("browserless", &config.keys.browserless,   "BROWSERLESS_API_KEY", "Cloud browser for Cloudflare/JS-heavy pages"),
         ("xai",         &config.keys.xai,          "XAI_API_KEY",         "X/Twitter social search via xAI Grok"),
+        ("you",         &config.keys.you,          "YOU_API_KEY",         "LLM-ready web and news search"),
     ];
 
     if c {
