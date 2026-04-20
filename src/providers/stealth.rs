@@ -6,6 +6,7 @@ use rquest::header::{HeaderMap, HeaderValue};
 use rquest_util::Emulation;
 use std::sync::Arc;
 use std::time::Duration;
+use tl::ParserOptions;
 use url::Url;
 
 pub struct Stealth {
@@ -106,23 +107,11 @@ impl Stealth {
         })?;
         let html = String::from_utf8_lossy(&html_bytes).into_owned();
 
-        // Try readability first, fallback to raw text extraction
+        // Extract title via tl, body via tag stripping
         let (title, text) = {
-            let mut cursor = std::io::Cursor::new(html.as_bytes());
-            match readability::extractor::extract(&mut cursor, &url) {
-                Ok(article) if !article.text.trim().is_empty() => {
-                    let title = if article.title.is_empty() {
-                        url_str.to_string()
-                    } else {
-                        article.title
-                    };
-                    (title, article.text)
-                }
-                _ => {
-                    // Readability failed or returned empty — fallback
-                    (url_str.to_string(), extract_text_fallback(&html))
-                }
-            }
+            let title = extract_title(&html).unwrap_or_else(|| url_str.to_string());
+            let body = extract_text_fallback(&html);
+            (title, body)
         };
 
         if text.trim().is_empty() {
@@ -143,6 +132,16 @@ impl Stealth {
             extra: None,
         }])
     }
+}
+
+/// Extract <title> from HTML using tl parser
+fn extract_title(html: &str) -> Option<String> {
+    let dom = tl::parse(html, ParserOptions::default()).ok()?;
+    let parser = dom.parser();
+    let mut titles = dom.query_selector("title")?;
+    let node = titles.next()?.get(parser)?;
+    let text = node.inner_text(parser).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Simple fallback: strip all HTML tags and return text
