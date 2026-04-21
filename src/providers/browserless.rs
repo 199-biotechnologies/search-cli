@@ -18,6 +18,22 @@ impl Browserless {
         super::resolve_key(&self.ctx.config.keys.browserless, "BROWSERLESS_API_KEY")
     }
 
+    fn classify_rejection(status: reqwest::StatusCode, body_text: &str) -> Option<SearchError> {
+        // Browserless signature for key/endpoint auth mode mismatch.
+        let lower = body_text.to_lowercase();
+        let mismatch = lower.contains("auth")
+            && lower.contains("mode")
+            && lower.contains("mismatch");
+        if status == reqwest::StatusCode::INTERNAL_SERVER_ERROR && mismatch {
+            return Some(SearchError::Api {
+                provider: "browserless",
+                code: "auth_mode_mismatch",
+                message: "Browserless auth mode mismatch between key and endpoint".to_string(),
+            });
+        }
+        None
+    }
+
     /// Scrape a URL using Browserless cloud browser (handles Cloudflare, JS rendering)
     pub async fn scrape_url(&self, url: &str) -> Result<Vec<SearchResult>, SearchError> {
         if self.api_key().is_empty() {
@@ -51,10 +67,17 @@ impl Browserless {
                 });
             }
             if !r.status().is_success() {
+                let status = r.status();
+                let body_text = r.text().await.unwrap_or_default();
+
+                if let Some(classified) = Self::classify_rejection(status, &body_text) {
+                    return Err(classified);
+                }
+
                 return Err(SearchError::Api {
                     provider: "browserless",
                     code: "api_error",
-                    message: format!("HTTP {}", r.status()),
+                    message: format!("HTTP {}", status),
                 });
             }
 
@@ -69,18 +92,31 @@ impl Browserless {
             message: format!("Invalid URL '{}': {}", url, e),
         })?;
 
-        let mut cursor = std::io::Cursor::new(resp.as_bytes());
-        let (title, text) = match readability::extractor::extract(&mut cursor, &parsed_url) {
-            Ok(article) if !article.text.trim().is_empty() => {
-                let title = if article.title.is_empty() {
-                    url.to_string()
-                } else {
-                    article.title
-                };
-                (title, article.text)
+        // Offload extraction to blocking pool so readability parsing doesn't
+        // block async runtime workers.
+        let resp_for_extract = resp;
+        let parsed_url_for_extract = parsed_url.clone();
+        let fallback_title = url.to_string();
+        let (title, text) = tokio::task::spawn_blocking(move || {
+            let mut cursor = std::io::Cursor::new(resp_for_extract.as_bytes());
+            match readability::extractor::extract(&mut cursor, &parsed_url_for_extract) {
+                Ok(article) if !article.text.trim().is_empty() => {
+                    let title = if article.title.is_empty() {
+                        fallback_title.clone()
+                    } else {
+                        article.title
+                    };
+                    (title, article.text)
+                }
+                _ => (fallback_title, extract_text_simple(&resp_for_extract)),
             }
-            _ => (url.to_string(), extract_text_simple(&resp)),
-        };
+        })
+        .await
+        .map_err(|e| SearchError::Api {
+            provider: "browserless",
+            code: "extraction_error",
+            message: format!("Browserless extraction task failed: {e}"),
+        })?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -152,5 +188,33 @@ impl super::Provider for Browserless {
         _opts: &SearchOpts,
     ) -> Result<Vec<SearchResult>, SearchError> {
         Ok(vec![])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_rejection_auth_mode_mismatch() {
+        let err = Browserless::classify_rejection(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "Auth mode mismatch detected between token and endpoint",
+        )
+        .expect("expected classified rejection");
+
+        match err {
+            SearchError::Api { code, .. } => assert_eq!(code, "auth_mode_mismatch"),
+            _ => panic!("expected SearchError::Api"),
+        }
+    }
+
+    #[test]
+    fn test_classify_rejection_none_for_other_errors() {
+        let err = Browserless::classify_rejection(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "generic server failure",
+        );
+        assert!(err.is_none());
     }
 }

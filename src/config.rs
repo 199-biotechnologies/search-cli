@@ -3,8 +3,52 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
+
+/// Deserialize a u64 that tolerates legacy quoted numeric strings (e.g., timeout = "77").
+/// Coercion is only applied to string values that parse as u64; other strings fail clearly.
+fn deserialize_u64_tolerant<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum RawU64 {
+        Native(u64),
+        Quoted(String),
+    }
+
+    let raw = RawU64::deserialize(deserializer)?;
+    match raw {
+        RawU64::Native(v) => Ok(v),
+        RawU64::Quoted(s) => s.parse::<u64>().map_err(|e| {
+            serde::de::Error::custom(format!("invalid numeric value: '{}' - {}", s, e))
+        }),
+    }
+}
+
+/// Deserialize a usize that tolerates legacy quoted numeric strings (e.g., count = "15").
+/// Coercion is only applied to string values that parse as usize; other strings fail clearly.
+fn deserialize_usize_tolerant<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum RawUsize {
+        Native(usize),
+        Quoted(String),
+    }
+
+    let raw = RawUsize::deserialize(deserializer)?;
+    match raw {
+        RawUsize::Native(v) => Ok(v),
+        RawUsize::Quoted(s) => s.parse::<usize>().map_err(|e| {
+            serde::de::Error::custom(format!("invalid numeric value: '{}' - {}", s, e))
+        }),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -40,9 +84,9 @@ pub struct ApiKeys {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(default = "default_timeout")]
+    #[serde(default = "default_timeout", deserialize_with = "deserialize_u64_tolerant")]
     pub timeout: u64,
-    #[serde(default = "default_count")]
+    #[serde(default = "default_count", deserialize_with = "deserialize_usize_tolerant")]
     pub count: usize,
 }
 
@@ -185,6 +229,7 @@ pub fn config_set(key: &str, value: &str) -> Result<(), crate::errors::SearchErr
     let parts: Vec<&str> = key.split('.').collect();
     match parts.len() {
         1 => {
+            // Top-level keys are strings by convention (e.g., keys.*)
             doc.insert(parts[0].to_string(), toml::Value::String(value.to_string()));
         }
         2 => {
@@ -192,7 +237,56 @@ pub fn config_set(key: &str, value: &str) -> Result<(), crate::errors::SearchErr
                 .entry(parts[0])
                 .or_insert_with(|| toml::Value::Table(toml::Table::new()));
             if let toml::Value::Table(t) = section {
-                t.insert(parts[1].to_string(), toml::Value::String(value.to_string()));
+                // Typed handling for settings.* fields
+                if parts[0] == "settings" {
+                    match parts[1] {
+                        "timeout" => {
+                            // timeout is u64 in AppConfig; validate and store as integer
+                            match value.parse::<u64>() {
+                                Ok(vu) => {
+                                    if vu <= i64::MAX as u64 {
+                                        t.insert(parts[1].to_string(), toml::Value::Integer(vu as i64));
+                                    } else {
+                                        return Err(crate::errors::SearchError::Config(format!(
+                                            "Value for {key} is too large"
+                                        )));
+                                    }
+                                }
+                                Err(_) => {
+                                    return Err(crate::errors::SearchError::Config(format!(
+                                        "Invalid numeric value for {key}: {value}"
+                                    )));
+                                }
+                            }
+                        }
+                        "count" => {
+                            // count is usize in AppConfig; validate and store as integer
+                            match value.parse::<usize>() {
+                                Ok(vc) => {
+                                    // Convert usize -> i64 safely
+                                    let vi = i64::try_from(vc).map_err(|_| {
+                                        crate::errors::SearchError::Config(format!(
+                                            "Value for {key} is too large"
+                                        ))
+                                    })?;
+                                    t.insert(parts[1].to_string(), toml::Value::Integer(vi));
+                                }
+                                Err(_) => {
+                                    return Err(crate::errors::SearchError::Config(format!(
+                                        "Invalid numeric value for {key}: {value}"
+                                    )));
+                                }
+                            }
+                        }
+                        _ => {
+                            // Unknown setting — store as string to be conservative
+                            t.insert(parts[1].to_string(), toml::Value::String(value.to_string()));
+                        }
+                    }
+                } else {
+                    // Other sections: store values as strings by default
+                    t.insert(parts[1].to_string(), toml::Value::String(value.to_string()));
+                }
             }
         }
         _ => {

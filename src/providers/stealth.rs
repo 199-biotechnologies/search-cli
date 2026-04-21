@@ -17,8 +17,9 @@ impl Stealth {
         Self { _ctx: ctx }
     }
 
-    /// Build an rquest client that impersonates Chrome with full TLS fingerprint
-    fn build_client() -> Result<rquest::Client, SearchError> {
+    /// Build an rquest client that impersonates Chrome with full TLS fingerprint.
+    /// Timeout is sourced from unified config timeout budget.
+    fn build_client(timeout_secs: u64) -> Result<rquest::Client, SearchError> {
         let mut headers = HeaderMap::new();
 
         // Chrome 136 stealth headers (matches Scrapling's browserforge output)
@@ -64,7 +65,7 @@ impl Stealth {
         rquest::Client::builder()
             .emulation(Emulation::Chrome136)
             .default_headers(headers)
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| SearchError::Config(format!("Failed to build stealth client: {e}")))
     }
@@ -78,7 +79,7 @@ impl Stealth {
     }
 
     pub async fn scrape_url(&self, url_str: &str) -> Result<Vec<SearchResult>, SearchError> {
-        let client = Self::build_client()?;
+        let client = Self::build_client(self._ctx.config.settings.timeout)?;
         let url =
             Url::parse(url_str).map_err(|e| SearchError::Config(format!("Invalid URL: {e}")))?;
 
@@ -106,13 +107,17 @@ impl Stealth {
         })?;
         let html = String::from_utf8_lossy(&html_bytes).into_owned();
 
-        // Try readability first, fallback to raw text extraction
-        let (title, text) = {
-            let mut cursor = std::io::Cursor::new(html.as_bytes());
-            match readability::extractor::extract(&mut cursor, &url) {
+        // Offload extraction to blocking pool so heavy HTML parsing doesn't block
+        // the async runtime worker.
+        let html_for_extract = html;
+        let url_for_extract = url.clone();
+        let fallback_title = url_str.to_string();
+        let (title, text) = tokio::task::spawn_blocking(move || {
+            let mut cursor = std::io::Cursor::new(html_for_extract.as_bytes());
+            match readability::extractor::extract(&mut cursor, &url_for_extract) {
                 Ok(article) if !article.text.trim().is_empty() => {
                     let title = if article.title.is_empty() {
-                        url_str.to_string()
+                        fallback_title.clone()
                     } else {
                         article.title
                     };
@@ -120,10 +125,12 @@ impl Stealth {
                 }
                 _ => {
                     // Readability failed or returned empty — fallback
-                    (url_str.to_string(), extract_text_fallback(&html))
+                    (fallback_title, extract_text_fallback(&html_for_extract))
                 }
             }
-        };
+        })
+        .await
+        .map_err(|e| SearchError::Config(format!("Stealth extraction task failed: {e}")))?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -204,7 +211,7 @@ impl super::Provider for Stealth {
     }
 
     fn timeout(&self) -> Duration {
-        Duration::from_secs(30)
+        Duration::from_secs(self._ctx.config.settings.timeout)
     }
 
     async fn search(

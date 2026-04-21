@@ -190,7 +190,7 @@ async fn smtp_probe(mx_host: &str, email: &str) -> SmtpResult {
 
     match code {
         250 | 251 => SmtpResult::Accepted(code),
-        550 | 551 | 552 | 553 | 554 => SmtpResult::Rejected(code),
+        550..=554 => SmtpResult::Rejected(code),
         450 | 451 | 452 | 421 => SmtpResult::Greylisted(code),
         _ => SmtpResult::Rejected(code),
     }

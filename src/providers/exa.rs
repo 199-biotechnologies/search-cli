@@ -20,12 +20,34 @@ impl Exa {
         super::resolve_key(&self.ctx.config.keys.exa, "EXA_API_KEY")
     }
 
+    fn classify_rejection(status: reqwest::StatusCode, body_text: &str) -> Option<SearchError> {
+        // Exa-specific signature: NUM_RESULTS_EXCEEDED indicates request
+        // count exceeded provider limits.
+        if status == reqwest::StatusCode::BAD_REQUEST
+            && body_text.contains("NUM_RESULTS_EXCEEDED")
+        {
+            return Some(SearchError::Api {
+                provider: "exa",
+                code: "num_results_exceeded",
+                message: "Exa rejected request count (NUM_RESULTS_EXCEEDED)".to_string(),
+            });
+        }
+        None
+    }
+
+    fn base_url() -> String {
+        std::env::var("EXA_BASE_URL")
+            .unwrap_or_else(|_| "https://api.exa.ai".to_string())
+            .trim_end_matches('/')
+            .to_string()
+    }
+
     async fn post_api(&self, path: &str, body: serde_json::Value) -> Result<ExaResponse, SearchError> {
         if self.api_key().is_empty() {
             return Err(SearchError::AuthMissing { provider: "exa" });
         }
 
-        let url = format!("https://api.exa.ai/{path}");
+        let url = format!("{}/{}", Self::base_url(), path);
         let client = &self.ctx.client;
         let api_key = self.api_key();
 
@@ -42,10 +64,17 @@ impl Exa {
                 return Err(SearchError::RateLimited { provider: "exa" });
             }
             if !resp.status().is_success() {
+                let status = resp.status();
+                let body_text = resp.text().await.unwrap_or_default();
+
+                if let Some(classified) = Self::classify_rejection(status, &body_text) {
+                    return Err(classified);
+                }
+
                 return Err(SearchError::Api {
                     provider: "exa",
                     code: "api_error",
-                    message: format!("HTTP {}", resp.status()),
+                    message: format!("HTTP {}", status),
                 });
             }
 
@@ -58,6 +87,31 @@ impl Exa {
             })
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_rejection_num_results_exceeded() {
+        let err = Exa::classify_rejection(
+            reqwest::StatusCode::BAD_REQUEST,
+            "{\"error\":\"NUM_RESULTS_EXCEEDED\"}",
+        )
+        .expect("expected classified rejection");
+
+        match err {
+            SearchError::Api { code, .. } => assert_eq!(code, "num_results_exceeded"),
+            _ => panic!("expected SearchError::Api"),
+        }
+    }
+
+    #[test]
+    fn test_classify_rejection_ignores_other_errors() {
+        let err = Exa::classify_rejection(reqwest::StatusCode::BAD_REQUEST, "{\"error\":\"OTHER\"}");
+        assert!(err.is_none());
     }
 }
 

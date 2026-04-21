@@ -242,6 +242,53 @@ export SEARCH_KEYS_BROWSERLESS=your-key
 export SEARCH_KEYS_XAI=your-key
 ```
 
+## Troubleshooting Rejection Diagnostics
+
+When a provider rejects a request, `search` now emits actionable diagnostics in both JSON and table outputs.
+
+### JSON fields
+
+For top-level errors (`stderr` JSON envelope):
+
+- `error.code` - stable machine code
+- `error.cause` - normalized category (e.g. `provider_limit_exceeded`)
+- `error.action` - concise remediation guidance
+- `error.signature` - provider-specific diagnostic signature
+
+For search responses with failed providers (`stdout` JSON):
+
+- `metadata.providers_failed_detail[].code`
+- `metadata.providers_failed_detail[].cause`
+- `metadata.providers_failed_detail[].action`
+- `metadata.providers_failed_detail[].signature`
+
+### Common signatures and actions
+
+- `exa.NUM_RESULTS_EXCEEDED`
+  - Cause: request count exceeded provider limits
+  - Action: lower `-c/--count` (or use a provider with higher limits)
+
+- `jina.cloudflare_1010`
+  - Cause: upstream access denied by Cloudflare policy
+  - Action: switch provider or use extract/scrape fallback chain
+
+- `browserless.auth_mode_mismatch`
+  - Cause: Browserless key/endpoint auth mode mismatch
+  - Action: verify Browserless endpoint and auth mode configuration
+
+### Repro commands
+
+```bash
+# Show structured error envelope with diagnostic fields
+search search -q "test" -p nonexistent --json
+
+# Force Exa diagnostic signature in local test setup (used by integration tests)
+EXA_API_KEY=test-key EXA_BASE_URL=http://127.0.0.1:9999 \
+  search search -q "rejection guidance test" -m people -p exa --json
+```
+
+If you only want results and no human diagnostics in scripts, keep using JSON mode and parse the structured fields.
+
 ## Updating
 
 ```bash
