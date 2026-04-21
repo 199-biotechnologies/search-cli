@@ -18,6 +18,13 @@ impl Brave {
     fn api_key(&self) -> String {
         super::resolve_key(&self.ctx.config.keys.brave, "BRAVE_API_KEY")
     }
+
+    fn base_url(&self) -> String {
+        std::env::var("BRAVE_BASE_URL")
+            .unwrap_or_else(|_| "https://api.search.brave.com".to_string())
+            .trim_end_matches('/')
+            .to_string()
+    }
 }
 
 #[derive(Deserialize)]
@@ -104,13 +111,14 @@ impl super::Provider for Brave {
 
         let client = &self.ctx.client;
         let api_key = self.api_key();
+        let endpoint = format!("{}/res/v1/web/search", self.base_url());
         let count_str = count.to_string();
         let q = augment_query(query, opts);
         let freshness = opts.freshness.as_deref().map(map_freshness);
 
         super::retry_request(|| async {
             let mut req = client
-                .get("https://api.search.brave.com/res/v1/web/search")
+                .get(&endpoint)
                 .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[("q", q.as_str()), ("count", &count_str), ("extra_snippets", "true")]);
@@ -177,13 +185,14 @@ impl super::Provider for Brave {
 
         let client = &self.ctx.client;
         let api_key = self.api_key();
+        let endpoint = format!("{}/res/v1/news/search", self.base_url());
         let count_str = count.to_string();
         let q = augment_query(query, opts);
         let freshness = opts.freshness.as_deref().map(map_freshness);
 
         super::retry_request(|| async {
             let mut req = client
-                .get("https://api.search.brave.com/res/v1/news/search")
+                .get(&endpoint)
                 .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[("q", q.as_str()), ("count", &count_str)]);
@@ -241,13 +250,14 @@ impl Brave {
 
         let client = &self.ctx.client;
         let api_key = self.api_key();
+        let endpoint = format!("{}/res/v1/llm/context", self.base_url());
         let q = augment_query(query, opts);
         let count_str = count.to_string();
         let freshness = opts.freshness.as_deref().map(map_freshness);
 
         super::retry_request(|| async {
             let mut req = client
-                .get("https://api.search.brave.com/res/v1/llm/context")
+                .get(&endpoint)
                 .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[

@@ -18,6 +18,18 @@ impl Jina {
     fn api_key(&self) -> String {
         super::resolve_key(&self.ctx.config.keys.jina, "JINA_API_KEY")
     }
+
+    fn classify_rejection(body_text: &str) -> Option<SearchError> {
+        let lower = body_text.to_lowercase();
+        if body_text.contains("1010") || lower.contains("cloudflare") {
+            return Some(SearchError::Api {
+                provider: "jina",
+                code: "cloudflare_1010",
+                message: "Jina request blocked by Cloudflare (1010)".to_string(),
+            });
+        }
+        None
+    }
 }
 
 #[derive(Deserialize)]
@@ -89,10 +101,17 @@ impl super::Provider for Jina {
                 return Err(SearchError::RateLimited { provider: "jina" });
             }
             if !resp.status().is_success() {
+                let status = resp.status();
+                let body_text = resp.text().await.unwrap_or_default();
+
+                if let Some(classified) = Self::classify_rejection(&body_text) {
+                    return Err(classified);
+                }
+
                 return Err(SearchError::Api {
                     provider: "jina",
                     code: "api_error",
-                    message: format!("HTTP {}", resp.status()),
+                    message: format!("HTTP {}", status),
                 });
             }
 
@@ -147,10 +166,17 @@ impl Jina {
                 .await?;
 
             if !resp.status().is_success() {
+                let status = resp.status();
+                let body_text = resp.text().await.unwrap_or_default();
+
+                if let Some(classified) = Self::classify_rejection(&body_text) {
+                    return Err(classified);
+                }
+
                 return Err(SearchError::Api {
                     provider: "jina",
                     code: "api_error",
-                    message: format!("HTTP {}", resp.status()),
+                    message: format!("HTTP {}", status),
                 });
             }
 
@@ -176,5 +202,25 @@ impl Jina {
             }])
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_rejection_cloudflare_1010() {
+        let err = Jina::classify_rejection("Error 1010: Cloudflare access denied")
+            .expect("expected classified rejection");
+        match err {
+            SearchError::Api { code, .. } => assert_eq!(code, "cloudflare_1010"),
+            _ => panic!("expected SearchError::Api"),
+        }
+    }
+
+    #[test]
+    fn test_classify_rejection_none_for_unrelated_text() {
+        assert!(Jina::classify_rejection("plain api error").is_none());
     }
 }

@@ -45,6 +45,7 @@ pub fn log_search(response: &SearchResponse) {
         "elapsed_ms": response.metadata.elapsed_ms,
         "providers_queried": response.metadata.providers_queried,
         "providers_failed": response.metadata.providers_failed,
+        "providers_failed_detail": response.metadata.providers_failed_detail,
         "sources": response.results.iter().map(|r| &r.source).collect::<Vec<_>>(),
         "urls": response.results.iter().take(10).map(|r| &r.url).collect::<Vec<_>>(),
     });

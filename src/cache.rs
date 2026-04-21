@@ -54,8 +54,31 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+/// Returns whether a response is safe/useful to persist in query cache.
+///
+/// We intentionally skip caching failure artifacts so repeated queries do not
+/// replay stale failed/degraded-empty responses.
+fn should_cache_query_response(response: &SearchResponse) -> bool {
+    // Explicit provider-failure terminal state.
+    if response.status == "all_providers_failed" {
+        return false;
+    }
+
+    // Defensive degraded-empty check (0 results with provider failures), even
+    // if status naming changes in the future.
+    if response.results.is_empty() && !response.metadata.providers_failed.is_empty() {
+        return false;
+    }
+
+    true
+}
+
 /// Save a query result to the TTL cache
 pub fn save_query(query: &str, mode: &str, response: &SearchResponse) {
+    if !should_cache_query_response(response) {
+        return;
+    }
+
     let dir = cache_dir();
     let _ = std::fs::create_dir_all(&dir);
     let entry = CachedEntry {

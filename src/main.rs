@@ -18,6 +18,7 @@ use context::AppContext;
 use output::{Ctx, OutputFormat};
 use std::sync::Arc;
 use tokio::net::lookup_host;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -37,8 +38,32 @@ fn has_json_flag() -> bool {
     false
 }
 
+fn init_tracing() {
+    // Quiet by default unless caller explicitly opts in.
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    if rust_log.trim().is_empty() {
+        return;
+    }
+
+    let filter = EnvFilter::try_new(rust_log).unwrap_or_else(|_| EnvFilter::new("info"));
+    let fmt_layer = fmt::layer()
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time()
+        .with_ansi(false)
+        .with_writer(std::io::stderr);
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .try_init();
+}
+
 #[tokio::main]
 async fn main() {
+    init_tracing();
+
     // 1. Pre-emptive DNS resolution (starts immediately in background)
     tokio::spawn(async {
         let domains = [
@@ -126,6 +151,7 @@ async fn main() {
     };
 
     let app = Arc::new(AppContext::new(config));
+    tracing::info!(event = "app_initialized", timeout_s = app.config.settings.timeout, default_count = app.config.settings.count);
 
     // 6. Pre-emptive TLS Handshake
     let is_search = cli.command.is_none() || matches!(cli.command, Some(Commands::Search(_)));
@@ -146,6 +172,7 @@ async fn main() {
     let exit_code = match run(cli, &ctx, app).await {
         Ok(code) => code,
         Err(e) => {
+            tracing::warn!(event = "search_failed", code = e.error_code(), message = %e);
             if ctx.is_json() {
                 output::json::render_error(&e);
             } else {
@@ -219,6 +246,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                     return Ok(0);
                 } else {
                     let err = errors::SearchError::Config("No cached results found. Run a search first.".into());
+                    tracing::warn!(event = "search_failed", code = err.error_code(), message = %err);
                     if ctx.is_json() {
                         output::json::render_error(&err);
                     } else {
@@ -239,6 +267,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                         let err = errors::SearchError::Config(format!(
                             "Unknown provider '{}'. Valid: {}", p, KNOWN.join(", ")
                         ));
+                        tracing::warn!(event = "search_failed", code = err.error_code(), message = %err);
                         if ctx.is_json() {
                             output::json::render_error(&err);
                         } else {
@@ -307,6 +336,16 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
             }
 
             let response = response?;
+
+            tracing::info!(
+                event = "search_completed",
+                mode = %response.mode,
+                status = %response.status,
+                elapsed_ms = response.metadata.elapsed_ms,
+                result_count = response.metadata.result_count,
+                providers_queried = ?response.metadata.providers_queried,
+                providers_failed = ?response.metadata.providers_failed
+            );
 
             cache::save_last(&response);
             cache::save_query(&args.query, &mode_str, &response);

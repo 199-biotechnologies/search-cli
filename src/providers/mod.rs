@@ -24,12 +24,23 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, SearchError>>,
 {
+    let mut attempt = 0;
     f.retry(
         ExponentialBuilder::default()
-            .with_min_delay(Duration::from_secs(1))
-            .with_max_delay(Duration::from_secs(4))
-            .with_max_times(3),
+        .with_min_delay(Duration::from_secs(1))
+        .with_max_delay(Duration::from_secs(4))
+        .with_max_times(3),
     )
+    .notify(|e: &SearchError, dur| {
+            attempt += 1;
+            tracing::info!(
+                event = "provider_retry",
+                attempt = attempt,
+                delay_ms = dur.as_millis() as u64,
+                reason_code = e.error_code(),
+                message = %e
+            );
+        })
     .when(|e| matches!(e, SearchError::Http(_)))
     .await
 }
