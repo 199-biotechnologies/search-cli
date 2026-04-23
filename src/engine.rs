@@ -292,7 +292,7 @@ fn classify_failure_reason(err: &SearchError) -> &'static str {
         SearchError::Api { .. }
         | SearchError::RateLimited { .. }
         | SearchError::Http(_)
-        | SearchError::Rquest(_) => "api",
+        | SearchError::Wreq(_) => "api",
         SearchError::Json(_) | SearchError::Io(_) => "unknown",
     }
 }

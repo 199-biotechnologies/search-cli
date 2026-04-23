@@ -33,7 +33,7 @@ pub enum SearchError {
     Http(#[from] reqwest::Error),
 
     #[error(transparent)]
-    Rquest(#[from] rquest::Error),
+    Wreq(#[from] wreq::Error),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -82,7 +82,7 @@ impl SearchError {
                 action: "Configure provider API key via env var or `search config set keys.<provider> ...`.",
                 signature: "provider.auth_missing",
             }),
-            Self::Api { .. } | Self::Http(_) | Self::Rquest(_) => Some(RejectionClassification {
+            Self::Api { .. } | Self::Http(_) | Self::Wreq(_) => Some(RejectionClassification {
                 cause: "provider_api_error",
                 action: "Retry with another provider or adjust query/mode parameters.",
                 signature: "provider.api_error",
@@ -96,7 +96,7 @@ impl SearchError {
             Self::Config(_) | Self::NoProviders(_) => 2,
             Self::AuthMissing { .. } => 2,
             Self::RateLimited { .. } => 4,
-            Self::Api { .. } | Self::Http(_) | Self::Rquest(_) => 1,
+            Self::Api { .. } | Self::Http(_) | Self::Wreq(_) => 1,
             Self::Json(_) | Self::Io(_) => 1,
         }
     }
@@ -108,7 +108,7 @@ impl SearchError {
             Self::RateLimited { .. } => "rate_limited",
             Self::Config(_) => "config_error",
             Self::NoProviders(_) => "no_providers",
-            Self::Http(_) | Self::Rquest(_) => "http_error",
+            Self::Http(_) | Self::Wreq(_) => "http_error",
             Self::Json(_) => "json_error",
             Self::Io(_) => "io_error",
         }

@@ -37,8 +37,8 @@ backon = "1"
 url = "2.5.8"
 mimalloc = "0.1.48"
 simd-json = "0.17.0"
-rquest = { version = "5", features = ["json", "cookies"] }
-rquest-util = "2"
+wreq = { version = "5", features = ["json", "cookies"] }
+wreq-util = "2"
 tl = "0.7"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
 readability = "0.3"
