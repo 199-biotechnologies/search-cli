@@ -5,3 +5,15 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Local tooling / scratch dirs
+.beads/
+.qartez/
+tmp/
+tmp_opencode/
+juspay-hyperswitch/
+openapi-generator/
+rust-lang-cargo/
+serde-rs-serde/
+docs/superpowers/
+docs/pr/

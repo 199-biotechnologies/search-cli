@@ -260,7 +260,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
             if let Some(ref providers) = args.providers {
                 const KNOWN: &[&str] = &[
                     "parallel", "brave", "serper", "exa", "jina", "firecrawl", "tavily",
-                    "serpapi", "perplexity", "browserless", "stealth", "xai",
+                    "serpapi", "perplexity", "browserless", "stealth", "xai", "you",
                 ];
                 for p in providers {
                     if !KNOWN.iter().any(|k| k.eq_ignore_ascii_case(p)) {
@@ -379,6 +379,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                             ("perplexity", !app.config.keys.perplexity.is_empty()),
                             ("browserless", !app.config.keys.browserless.is_empty()),
                             ("xai", !app.config.keys.xai.is_empty()),
+                            ("you", !app.config.keys.you.is_empty()),
                         ].iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
                         let info = serde_json::json!({
                             "version": "1",
@@ -484,7 +485,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                              "description": "Search mode"},
                             {"name": "-c/--count", "type": "integer", "required": false, "description": "Number of results"},
                             {"name": "-p/--providers", "type": "string[]", "required": false,
-                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai"],
+                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai","you"],
                              "description": "Comma-separated provider list"},
                             {"name": "-d/--domain", "type": "string[]", "required": false, "description": "Include only these domains"},
                             {"name": "--exclude-domain", "type": "string[]", "required": false, "description": "Exclude these domains"},

@@ -2,7 +2,7 @@
 
 # Search CLI
 
-**One binary, 11 providers, 14 modes. The web search tool your AI agent is missing.**
+**One binary, 12 providers, 14 modes. The web search tool your AI agent is missing.**
 
 <br />
 
@@ -19,7 +19,7 @@
 
 ---
 
-A single Rust binary that aggregates Brave, Serper, Exa, Jina, Firecrawl, Tavily, SerpApi, Perplexity, xAI, and more into one unified search interface. Designed from day one for AI agents -- structured JSON output, semantic exit codes, auto-JSON when piped, and parallel fan-out across providers in under 2 seconds.
+A single Rust binary that aggregates Brave, Serper, Exa, Jina, Firecrawl, Tavily, SerpApi, Perplexity, xAI, You.com, and more into one unified search interface. Designed from day one for AI agents -- structured JSON output, semantic exit codes, auto-JSON when piped, and parallel fan-out across providers in under 2 seconds.
 
 [Install](#install) | [How It Works](#how-it-works) | [Features](#features) | [Providers](#providers) | [Contributing](#contributing)
 
@@ -27,7 +27,7 @@ A single Rust binary that aggregates Brave, Serper, Exa, Jina, Firecrawl, Tavily
 
 ## Why This Exists
 
-Every search API is good at something different. Brave has its own 35-billion page index. Serper gives you raw Google results plus Scholar, Patents, and Places. Exa does neural/semantic search. Perplexity gives AI-synthesized answers with citations. Jina reads any URL into clean markdown. Firecrawl renders JavaScript-heavy pages. xAI searches X/Twitter.
+Every search API is good at something different. Brave has its own 35-billion page index. Serper gives you raw Google results plus Scholar, Patents, and Places. Exa does neural/semantic search. Perplexity gives AI-synthesized answers with citations. Jina reads any URL into clean markdown. Firecrawl renders JavaScript-heavy pages. xAI searches X/Twitter. You.com provides LLM-ready web + news snippets with low-latency responses.
 
 You shouldn't have to wire up each one separately, handle their different response formats, manage rate limits, or figure out which provider to use for which query type. `search` does all of that for you -- routes your query to the right combination automatically, fans out in parallel, deduplicates results, and gives you a single clean response.
 
@@ -125,11 +125,11 @@ search "your query here"
 | Mode | What it does | Providers used |
 |------|-------------|----------------|
 | `auto` | Detects intent from your query | *varies* |
-| `general` | Broad web search | Brave + Serper + Exa + Jina + Tavily + Perplexity |
-| `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity |
+| `general` | Broad web search | Brave + Serper + Exa + Jina + Tavily + Perplexity + You.com |
+| `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity + You.com |
 | `academic` | Research papers, studies | Exa + Serper + Tavily + Perplexity |
 | `people` | LinkedIn profiles, bios | Exa |
-| `deep` | Maximum coverage | Brave (LLM Context) + Exa + Serper + Tavily + Perplexity + xAI |
+| `deep` | Maximum coverage | Brave (LLM Context) + Exa + Serper + Tavily + Perplexity + xAI + You.com |
 | `scholar` | Google Scholar | Serper + SerpApi |
 | `patents` | Patent search | Serper |
 | `images` | Image search | Serper |
@@ -194,6 +194,7 @@ search --x "AI agents"
 # Pick specific providers
 search search -q "machine learning" -p exa
 search search -q "rust programming" -p brave,serper
+search search -q "latest AI model releases" -p you -f day
 
 # Control output
 search "query" --json | jq '.results[].url'
@@ -216,6 +217,7 @@ search "query" 2>/dev/null             # suppress diagnostics
 | **Browserless** | Cloud browser for Cloudflare/JS-heavy pages | Anti-bot bypass, dynamic rendering |
 | **Stealth** | Built-in anti-bot scraper | Protected pages, no API key needed |
 | **[xAI](https://x.ai/)** | X/Twitter search via Grok AI | Tweets, trending topics, social sentiment |
+| **[You.com](https://api.you.com/)** | LLM-ready web + news search API | Fast snippets, current events, agent grounding |
 
 ## Configuration
 
@@ -240,6 +242,7 @@ export SEARCH_KEYS_SERPAPI=your-key
 export SEARCH_KEYS_PERPLEXITY=your-key
 export SEARCH_KEYS_BROWSERLESS=your-key
 export SEARCH_KEYS_XAI=your-key
+export SEARCH_KEYS_YOU=your-key
 ```
 
 ## Troubleshooting Rejection Diagnostics
