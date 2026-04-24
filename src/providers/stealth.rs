@@ -6,6 +6,7 @@ use wreq::header::{HeaderMap, HeaderValue};
 use wreq_util::Emulation;
 use std::sync::Arc;
 use std::time::Duration;
+use tl::ParserOptions;
 use url::Url;
 
 pub struct Stealth {
@@ -107,30 +108,17 @@ impl Stealth {
         })?;
         let html = String::from_utf8_lossy(&html_bytes).into_owned();
 
-        // Offload extraction to blocking pool so heavy HTML parsing doesn't block
-        // the async runtime worker.
-        let html_for_extract = html;
-        let url_for_extract = url.clone();
-        let fallback_title = url_str.to_string();
-        let (title, text) = tokio::task::spawn_blocking(move || {
-            let mut cursor = std::io::Cursor::new(html_for_extract.as_bytes());
-            match readability::extractor::extract(&mut cursor, &url_for_extract) {
-                Ok(article) if !article.text.trim().is_empty() => {
-                    let title = if article.title.is_empty() {
-                        fallback_title.clone()
-                    } else {
-                        article.title
-                    };
-                    (title, article.text)
-                }
-                _ => {
-                    // Readability failed or returned empty — fallback
-                    (fallback_title, extract_text_fallback(&html_for_extract))
-                }
-            }
-        })
-        .await
-        .map_err(|e| SearchError::Config(format!("Stealth extraction task failed: {e}")))?;
+    // Offload extraction to blocking pool so heavy HTML parsing doesn't block
+    // the async runtime worker. Uses tl-based extraction (no readability/reqwest).
+    let html_for_extract = html;
+    let fallback_title = url_str.to_string();
+    let (title, text) = tokio::task::spawn_blocking(move || {
+        let title = extract_title(&html_for_extract).unwrap_or_else(|| fallback_title.clone());
+        let body = extract_text_fallback(&html_for_extract);
+        (title, body)
+    })
+    .await
+    .map_err(|e| SearchError::Config(format!("Stealth extraction task failed: {e}")))?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -150,6 +138,16 @@ impl Stealth {
             extra: None,
         }])
     }
+}
+
+/// Extract <title> from HTML using tl parser
+fn extract_title(html: &str) -> Option<String> {
+    let dom = tl::parse(html, ParserOptions::default()).ok()?;
+    let parser = dom.parser();
+    let mut titles = dom.query_selector("title")?;
+    let node = titles.next()?.get(parser)?;
+    let text = node.inner_text(parser).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Simple fallback: strip all HTML tags and return text

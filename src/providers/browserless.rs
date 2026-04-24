@@ -85,38 +85,21 @@ impl Browserless {
         })
         .await?;
 
-        // resp is fully rendered HTML — extract with readability
-        let parsed_url = url::Url::parse(url).map_err(|e| SearchError::Api {
-            provider: "browserless",
-            code: "invalid_url",
-            message: format!("Invalid URL '{}': {}", url, e),
-        })?;
-
-        // Offload extraction to blocking pool so readability parsing doesn't
-        // block async runtime workers.
-        let resp_for_extract = resp;
-        let parsed_url_for_extract = parsed_url.clone();
-        let fallback_title = url.to_string();
-        let (title, text) = tokio::task::spawn_blocking(move || {
-            let mut cursor = std::io::Cursor::new(resp_for_extract.as_bytes());
-            match readability::extractor::extract(&mut cursor, &parsed_url_for_extract) {
-                Ok(article) if !article.text.trim().is_empty() => {
-                    let title = if article.title.is_empty() {
-                        fallback_title.clone()
-                    } else {
-                        article.title
-                    };
-                    (title, article.text)
-                }
-                _ => (fallback_title, extract_text_simple(&resp_for_extract)),
-            }
-        })
-        .await
-        .map_err(|e| SearchError::Api {
-            provider: "browserless",
-            code: "extraction_error",
-            message: format!("Browserless extraction task failed: {e}"),
-        })?;
+    // Offload extraction to blocking pool so heavy HTML parsing doesn't block
+    // the async runtime worker. Uses tl-based extraction (no readability/reqwest).
+    let resp_for_extract = resp;
+    let fallback_title = url.to_string();
+    let (title, text) = tokio::task::spawn_blocking(move || {
+        let title = extract_title(&resp_for_extract).unwrap_or_else(|| fallback_title.clone());
+        let body = extract_text_simple(&resp_for_extract);
+        (title, body)
+    })
+    .await
+    .map_err(|e| SearchError::Api {
+        provider: "browserless",
+        code: "extraction_error",
+        message: format!("Browserless extraction task failed: {e}"),
+    })?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -136,6 +119,16 @@ impl Browserless {
             extra: None,
         }])
     }
+}
+
+/// Extract <title> from HTML using tl parser
+fn extract_title(html: &str) -> Option<String> {
+    let dom = tl::parse(html, tl::ParserOptions::default()).ok()?;
+    let parser = dom.parser();
+    let mut titles = dom.query_selector("title")?;
+    let node = titles.next()?.get(parser)?;
+    let text = node.inner_text(parser).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Simple HTML tag stripper

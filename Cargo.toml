@@ -32,7 +32,7 @@ regex = "1"
 async-trait = "0.1"
 owo-colors = "4"
 indicatif = "0.17"
-self_update = { version = "0.43", features = ["rustls"] }
+self_update = { version = "0.43", default-features = false, features = ["reqwest", "rustls", "archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate"] }
 backon = "1"
 url = "2.5.8"
 mimalloc = "0.1.48"
@@ -41,7 +41,6 @@ wreq = { version = "5", features = ["json", "cookies"] }
 wreq-util = "2"
 tl = "0.7"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
-readability = "0.3"
 
 [dev-dependencies]
 assert_cmd = "2"
