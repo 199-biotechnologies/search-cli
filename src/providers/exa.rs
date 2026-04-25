@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Exa {
     ctx: Arc<AppContext>,
@@ -213,7 +212,6 @@ impl super::Provider for Exa {
     fn capabilities(&self) -> &[&'static str] { &["general", "academic", "people", "similar", "deep"] }
     fn env_keys(&self) -> &[&'static str] { &["EXA_API_KEY", "SEARCH_KEYS_EXA"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
-    fn timeout(&self) -> Duration { Duration::from_secs(15) }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         let body = build_search_body(query, count, opts);

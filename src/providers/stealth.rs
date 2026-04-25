@@ -1,12 +1,12 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
+use crate::providers::extract_title;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use wreq::header::{HeaderMap, HeaderValue};
 use wreq_util::Emulation;
 use std::sync::Arc;
 use std::time::Duration;
-use tl::ParserOptions;
 use url::Url;
 
 pub struct Stealth {
@@ -90,9 +90,9 @@ impl Stealth {
             req = req.header("Referer", referer);
         }
 
-        let resp = req.send().await.map_err(|e| {
-            SearchError::Config(format!("Stealth request failed: {e}"))
-        })?;
+    let resp = req.send().await.map_err(|e| {
+        SearchError::Api { provider: "stealth", code: "http_error", message: format!("Stealth request failed: {e}") }
+    })?;
 
         if !resp.status().is_success() {
             return Err(SearchError::Api {
@@ -103,9 +103,9 @@ impl Stealth {
         }
 
         let final_url = url_str.to_string(); // use original URL (wreq may not expose final URL)
-        let html_bytes = resp.bytes().await.map_err(|e| {
-            SearchError::Config(format!("Failed to read body: {e}"))
-        })?;
+    let html_bytes = resp.bytes().await.map_err(|e| {
+        SearchError::Api { provider: "stealth", code: "read_error", message: format!("Failed to read body: {e}") }
+    })?;
         let html = String::from_utf8_lossy(&html_bytes).into_owned();
 
     // Offload extraction to blocking pool so heavy HTML parsing doesn't block
@@ -118,7 +118,7 @@ impl Stealth {
         (title, body)
     })
     .await
-    .map_err(|e| SearchError::Config(format!("Stealth extraction task failed: {e}")))?;
+    .map_err(|e| SearchError::Api { provider: "stealth", code: "extraction_error", message: format!("Stealth extraction task failed: {e}") })?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -138,16 +138,6 @@ impl Stealth {
             extra: None,
         }])
     }
-}
-
-/// Extract <title> from HTML using tl parser
-fn extract_title(html: &str) -> Option<String> {
-    let dom = tl::parse(html, ParserOptions::default()).ok()?;
-    let parser = dom.parser();
-    let mut titles = dom.query_selector("title")?;
-    let node = titles.next()?.get(parser)?;
-    let text = node.inner_text(parser).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Simple fallback: strip all HTML tags and return text
@@ -208,9 +198,6 @@ impl super::Provider for Stealth {
         true // No API key needed — local scraper
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(self._ctx.config.settings.timeout)
-    }
 
     async fn search(
         &self,

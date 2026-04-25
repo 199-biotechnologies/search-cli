@@ -1,9 +1,9 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
+use crate::providers::extract_title;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Browserless {
     ctx: Arc<AppContext>,
@@ -121,27 +121,39 @@ impl Browserless {
     }
 }
 
-/// Extract <title> from HTML using tl parser
-fn extract_title(html: &str) -> Option<String> {
-    let dom = tl::parse(html, tl::ParserOptions::default()).ok()?;
-    let parser = dom.parser();
-    let mut titles = dom.query_selector("title")?;
-    let node = titles.next()?.get(parser)?;
-    let text = node.inner_text(parser).trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
-}
-
-/// Simple HTML tag stripper
+/// Simple HTML tag stripper that skips `<script>` and `<style>` content
 fn extract_text_simple(html: &str) -> String {
     let mut text = String::with_capacity(html.len() / 3);
     let mut in_tag = false;
-    for c in html.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => text.push(c),
+    let mut in_skip = false;
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => {
+                in_tag = true;
+                let rest = &html[i..];
+                if rest.len() > 7
+                    && (rest[..7].eq_ignore_ascii_case("<script")
+                        || rest[..6].eq_ignore_ascii_case("<style"))
+                {
+                    in_skip = true;
+                }
+                if in_skip
+                    && rest.len() > 8
+                    && (rest[..9].eq_ignore_ascii_case("</script>")
+                        || rest[..8].eq_ignore_ascii_case("</style>"))
+                {
+                    in_skip = false;
+                }
+            }
+            b'>' => {
+                in_tag = false;
+            }
+            _ if !in_tag && !in_skip => text.push(bytes[i] as char),
             _ => {}
         }
+        i += 1;
     }
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -161,9 +173,6 @@ impl super::Provider for Browserless {
         !self.api_key().is_empty()
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(30)
-    }
 
     async fn search(
         &self,
@@ -209,5 +218,35 @@ mod tests {
             "generic server failure",
         );
         assert!(err.is_none());
+    }
+
+    #[test]
+    fn test_extract_text_simple_skips_script() {
+        let html = "<p>Hello</p><script>alert('xss')</script><p>World</p>";
+        let text = extract_text_simple(html);
+        assert!(!text.contains("alert"), "script content should be excluded");
+        assert!(!text.contains("xss"), "script content should be excluded");
+    }
+
+    #[test]
+    fn test_extract_text_simple_skips_style() {
+        let html = "<p>Hello</p><style>body { color: red; }</style><p>World</p>";
+        let text = extract_text_simple(html);
+        assert!(!text.contains("color"), "style content should be excluded");
+        assert!(!text.contains("red"), "style content should be excluded");
+    }
+
+    #[test]
+    fn test_extract_text_simple_preserves_visible_text() {
+        let html = "<script>var x = 1;</script><style>.cls{}</style><p>Hello</p>";
+        let text = extract_text_simple(html);
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_extract_text_simple_script_not_in_output() {
+        let html = "<script>alert('xss')</script><p>Hello</p>";
+        let text = extract_text_simple(html);
+        assert_eq!(text, "Hello");
     }
 }

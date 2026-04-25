@@ -17,8 +17,33 @@ use crate::errors::SearchError;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
+use tl::ParserOptions;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Append `site:` / `-site:` domain filters to a query string.
+/// Shared by brave, serper, and you providers.
+pub fn augment_query(query: &str, opts: &SearchOpts) -> String {
+    let mut q = query.to_string();
+    for d in &opts.include_domains {
+        q = format!("{q} site:{d}");
+    }
+    for d in &opts.exclude_domains {
+        q = format!("{q} -site:{d}");
+    }
+    q
+}
+
+/// Extract the `<title>` text from an HTML document.
+/// Shared by stealth and browserless providers.
+pub fn extract_title(html: &str) -> Option<String> {
+    let dom = tl::parse(html, ParserOptions::default()).ok()?;
+    let parser = dom.parser();
+    let mut titles = dom.query_selector("title")?;
+    let node = titles.next()?.get(parser)?;
+    let text = node.inner_text(parser).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
 
 pub async fn retry_request<F, Fut, T>(f: F) -> Result<T, SearchError>
 where
@@ -42,7 +67,7 @@ where
                 message = %e
             );
         })
-    .when(|e| matches!(e, SearchError::Http(_)))
+    .when(|e| matches!(e, SearchError::Http(_) | SearchError::Wreq(_)))
     .await
 }
 
@@ -61,9 +86,6 @@ pub trait Provider: Send + Sync {
     fn is_configured(&self) -> bool;
     /// Standard env var names accepted by this provider (e.g. BRAVE_API_KEY).
     fn env_keys(&self) -> &[&'static str];
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(10)
-    }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError>;
     async fn search_news(&self, query: &str, count: usize, opts: &SearchOpts)

@@ -132,9 +132,16 @@ pub fn config_dir() -> PathBuf {
     }
 }
 
+/// Cross-platform home directory: $HOME on Unix, %USERPROFILE% on Windows.
+pub fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
 fn dirs_fallback() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".config").join("search")
+    home_dir().join(".config").join("search")
 }
 
 pub fn config_path() -> PathBuf {

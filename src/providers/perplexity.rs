@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Perplexity {
     ctx: Arc<AppContext>,
@@ -187,9 +186,6 @@ impl super::Provider for Perplexity {
     }
     fn is_configured(&self) -> bool {
         !self.api_key().is_empty()
-    }
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(30)
     }
 
     async fn search(

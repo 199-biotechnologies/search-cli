@@ -130,3 +130,15 @@ pub struct ErrorDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
 }
+
+/// Map human-readable freshness ("day", "week", "month", "year") to
+/// provider-specific period codes. Shared by brave and you providers.
+pub fn map_freshness(f: &str) -> &str {
+    match f {
+        "day" => "pd",
+        "week" => "pw",
+        "month" => "pm",
+        "year" => "py",
+        other => other, // pass through if already in provider format
+    }
+}

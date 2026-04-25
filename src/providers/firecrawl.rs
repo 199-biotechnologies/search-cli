@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Firecrawl {
     ctx: Arc<AppContext>,
@@ -54,9 +53,6 @@ impl super::Provider for Firecrawl {
         !self.api_key().is_empty()
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(30)
-    }
 
     async fn search(&self, query: &str, count: usize, _opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if self.api_key().is_empty() {

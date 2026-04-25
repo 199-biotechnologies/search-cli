@@ -1,10 +1,10 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
+use crate::providers::augment_query;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Serper {
     ctx: Arc<AppContext>,
@@ -81,17 +81,6 @@ impl Serper {
     }
 }
 
-fn augment_query(query: &str, opts: &SearchOpts) -> String {
-    let mut q = query.to_string();
-    for d in &opts.include_domains {
-        q = format!("{q} site:{d}");
-    }
-    for d in &opts.exclude_domains {
-        q = format!("{q} -site:{d}");
-    }
-    q
-}
-
 fn parse_organic(body: &serde_json::Value, source: &str) -> Vec<SearchResult> {
     let key = match source {
         "serper_news" => "news",
@@ -124,7 +113,6 @@ impl super::Provider for Serper {
     fn capabilities(&self) -> &[&'static str] { &["general", "news", "scholar", "patents", "images", "places"] }
     fn env_keys(&self) -> &[&'static str] { &["SERPER_API_KEY", "SEARCH_KEYS_SERPER"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
-    fn timeout(&self) -> Duration { Duration::from_secs(10) }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         let body = self.query_endpoint("search", query, count, opts).await?;

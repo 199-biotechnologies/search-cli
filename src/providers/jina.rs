@@ -4,7 +4,6 @@ use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Jina {
     ctx: Arc<AppContext>,
@@ -60,9 +59,6 @@ impl super::Provider for Jina {
         !self.api_key().is_empty()
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(15)
-    }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {

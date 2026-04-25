@@ -1,10 +1,10 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::{SearchOpts, SearchResult};
+use crate::providers::augment_query;
+use crate::types::{map_freshness, SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Brave {
     ctx: Arc<AppContext>,
@@ -59,29 +59,6 @@ struct BraveNewsResult {
     age: Option<String>,
 }
 
-/// Brave freshness: pd (day), pw (week), pm (month), py (year)
-fn map_freshness(f: &str) -> &str {
-    match f {
-        "day" => "pd",
-        "week" => "pw",
-        "month" => "pm",
-        "year" => "py",
-        other => other, // pass through if already in Brave format
-    }
-}
-
-/// Append site: operators for domain filtering
-fn augment_query(query: &str, opts: &SearchOpts) -> String {
-    let mut q = query.to_string();
-    for d in &opts.include_domains {
-        q = format!("{q} site:{d}");
-    }
-    for d in &opts.exclude_domains {
-        q = format!("{q} -site:{d}");
-    }
-    q
-}
-
 #[async_trait]
 impl super::Provider for Brave {
     fn name(&self) -> &'static str {
@@ -100,9 +77,6 @@ impl super::Provider for Brave {
         !self.api_key().is_empty()
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(10)
-    }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {

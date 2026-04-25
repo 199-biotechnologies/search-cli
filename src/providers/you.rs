@@ -1,11 +1,11 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::{SearchOpts, SearchResult};
+use crate::providers::augment_query;
+use crate::types::{map_freshness, SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct You {
     ctx: Arc<AppContext>,
@@ -20,33 +20,12 @@ impl You {
         super::resolve_key(&self.ctx.config.keys.you, "YOU_API_KEY")
     }
 
-    fn map_freshness(f: &str) -> &str {
-        match f {
-            "day" => "pd",
-            "week" => "pw",
-            "month" => "pm",
-            "year" => "py",
-            other => other,
-        }
-    }
-
-    fn augment_query(query: &str, opts: &SearchOpts) -> String {
-        let mut q = query.to_string();
-        for d in &opts.include_domains {
-            q = format!("{q} site:{d}");
-        }
-        for d in &opts.exclude_domains {
-            q = format!("{q} -site:{d}");
-        }
-        q
-    }
-
     async fn do_search(&self, query: &str, count: usize, opts: &SearchOpts, include_news: bool) -> Result<Vec<SearchResult>, SearchError> {
         if self.api_key().is_empty() {
             return Err(SearchError::AuthMissing { provider: "you" });
         }
 
-        let q = Self::augment_query(query, opts);
+        let q = augment_query(query, opts);
         let mut req = self
             .ctx
             .client
@@ -54,7 +33,7 @@ impl You {
             .header("X-API-Key", self.api_key())
             .query(&[("query", q.as_str()), ("count", &count.to_string()), ("country", "US"), ("safesearch", "moderate")]);
 
-        if let Some(f) = opts.freshness.as_deref().map(Self::map_freshness) {
+        if let Some(f) = opts.freshness.as_deref().map(map_freshness) {
             req = req.query(&[("freshness", f)]);
         }
 
@@ -136,7 +115,6 @@ impl super::Provider for You {
     fn capabilities(&self) -> &[&'static str] { &["general", "news", "deep"] }
     fn env_keys(&self) -> &[&'static str] { &["YOU_API_KEY", "SEARCH_KEYS_YOU"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
-    fn timeout(&self) -> Duration { Duration::from_secs(12) }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         self.do_search(query, count, opts, false).await
@@ -144,5 +122,57 @@ impl super::Provider for You {
 
     async fn search_news(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         self.do_search(query, count, opts, true).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_you_response_deserialize_hits_only() {
+        let json = r#"{"hits":[{"title":"Rust","url":"https://rust-lang.org","snippet":"Systems language","score":0.95}]}"#;
+        let resp: YouResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.hits.unwrap().len(), 1);
+        assert!(resp.news.is_none());
+    }
+
+    #[test]
+    fn test_you_response_deserialize_news_only() {
+        let json = r#"{"news":[{"title":"Breaking","url":"https://news.example","description":"Update","age":"2h"}]}"#;
+        let resp: YouResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.hits.is_none());
+        assert_eq!(resp.news.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_you_response_deserialize_empty() {
+        let json = r#"{}"#;
+        let resp: YouResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.hits.is_none());
+        assert!(resp.news.is_none());
+    }
+
+    #[test]
+    fn test_you_hit_optional_fields() {
+        // Minimal hit with all fields optional
+        let json = r#"{"hits":[{}]}"#;
+        let resp: YouResponse = serde_json::from_str(json).unwrap();
+        let hit = &resp.hits.unwrap()[0];
+        assert!(hit.title.is_none());
+        assert!(hit.url.is_none());
+        assert!(hit.snippet.is_none());
+        assert!(hit.score.is_none());
+    }
+
+    #[test]
+    fn test_you_news_optional_fields() {
+        let json = r#"{"news":[{}]}"#;
+        let resp: YouResponse = serde_json::from_str(json).unwrap();
+        let item = &resp.news.unwrap()[0];
+        assert!(item.title.is_none());
+        assert!(item.url.is_none());
+        assert!(item.description.is_none());
+        assert!(item.age.is_none());
     }
 }

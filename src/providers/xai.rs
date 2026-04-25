@@ -1,11 +1,11 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
 use crate::types::{SearchOpts, SearchResult};
+use crate::utils::epoch_days_to_date;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Xai {
     ctx: Arc<AppContext>,
@@ -163,21 +163,6 @@ fn subtract_days(today: &str, days: u64) -> Option<String> {
     Some(epoch_days_to_date(target_days))
 }
 
-fn epoch_days_to_date(total_days: u64) -> String {
-    // Algorithm to convert days since 1970-01-01 to YYYY-MM-DD
-    let z = total_days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
 #[derive(Deserialize)]
 struct XaiResponse {
     output: Option<Vec<XaiOutputItem>>,
@@ -274,9 +259,6 @@ impl super::Provider for Xai {
     }
     fn is_configured(&self) -> bool {
         !self.api_key().is_empty()
-    }
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(60)
     }
 
     async fn search(

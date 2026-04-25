@@ -159,6 +159,7 @@ pub enum SkillAction {
 }
 
 pub mod skill {
+    use crate::config::home_dir;
     use crate::output::Ctx;
     use std::path::PathBuf;
 
@@ -169,15 +170,8 @@ pub mod skill {
         path: PathBuf,
     }
 
-    fn home() -> PathBuf {
-        std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    }
-
-    fn targets() -> Vec<Target> {
-        let h = home();
+fn targets() -> Vec<Target> {
+    let h = home_dir();
         vec![
             Target { name: "Claude Code", path: h.join(".claude/skills/search") },
             Target { name: "Codex CLI", path: h.join(".codex/skills/search") },

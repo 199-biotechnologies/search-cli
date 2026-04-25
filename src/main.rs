@@ -9,6 +9,7 @@ mod logging;
 mod output;
 mod providers;
 mod types;
+mod utils;
 mod verify;
 
 use clap::Parser;
@@ -63,6 +64,7 @@ fn init_tracing() {
 #[tokio::main]
 async fn main() {
     init_tracing();
+    crate::cache::evict_expired();
 
     // 1. Pre-emptive DNS resolution (starts immediately in background)
     tokio::spawn(async {
