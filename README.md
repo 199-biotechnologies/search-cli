@@ -2,7 +2,7 @@
 
 # Search CLI
 
-**One binary, 11 providers, 14 modes. The web search tool your AI agent is missing.**
+**One binary, 12 providers, 14 modes. The web search tool your AI agent is missing.**
 
 <br />
 
@@ -19,7 +19,7 @@
 
 ---
 
-A single Rust binary that aggregates Brave, Serper, Exa, Jina, Firecrawl, Tavily, SerpApi, Perplexity, xAI, and more into one unified search interface. Designed from day one for AI agents -- structured JSON output, semantic exit codes, auto-JSON when piped, and parallel fan-out across providers in under 2 seconds.
+A single Rust binary that aggregates Brave, Serper, Exa, Jina, Firecrawl, Tavily, SerpApi, Perplexity, xAI, You.com, and more into one unified search interface. Designed from day one for AI agents -- structured JSON output, semantic exit codes, auto-JSON when piped, and parallel fan-out across providers in under 2 seconds.
 
 [Install](#install) | [How It Works](#how-it-works) | [Features](#features) | [Providers](#providers) | [Contributing](#contributing)
 
@@ -27,7 +27,7 @@ A single Rust binary that aggregates Brave, Serper, Exa, Jina, Firecrawl, Tavily
 
 ## Why This Exists
 
-Every search API is good at something different. Brave has its own 35-billion page index. Serper gives you raw Google results plus Scholar, Patents, and Places. Exa does neural/semantic search. Perplexity gives AI-synthesized answers with citations. Jina reads any URL into clean markdown. Firecrawl renders JavaScript-heavy pages. xAI searches X/Twitter.
+Every search API is good at something different. Brave has its own 35-billion page index. Serper gives you raw Google results plus Scholar, Patents, and Places. Exa does neural/semantic search. Perplexity gives AI-synthesized answers with citations. Jina reads any URL into clean markdown. Firecrawl renders JavaScript-heavy pages. xAI searches X/Twitter. You.com offers web and news search with 100 free searches/day without an API key.
 
 You shouldn't have to wire up each one separately, handle their different response formats, manage rate limits, or figure out which provider to use for which query type. `search` does all of that for you -- routes your query to the right combination automatically, fans out in parallel, deduplicates results, and gives you a single clean response.
 
@@ -125,8 +125,8 @@ search "your query here"
 | Mode | What it does | Providers used |
 |------|-------------|----------------|
 | `auto` | Detects intent from your query | *varies* |
-| `general` | Broad web search | Brave + Serper + Exa + Jina + Tavily + Perplexity |
-| `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity |
+| `general` | Broad web search | Brave + Serper + Exa + Jina + Tavily + Perplexity + You.com |
+| `news` | Breaking news, current events | Brave News + Serper News + Tavily + Perplexity + You.com |
 | `academic` | Research papers, studies | Exa + Serper + Tavily + Perplexity |
 | `people` | LinkedIn profiles, bios | Exa |
 | `deep` | Maximum coverage | Brave (LLM Context) + Exa + Serper + Tavily + Perplexity + xAI |
@@ -213,6 +213,7 @@ search "query" 2>/dev/null             # suppress diagnostics
 | **[Tavily](https://tavily.com/)** | General + deep search, research-focused | Broad coverage, research queries |
 | **[SerpApi](https://serpapi.com/)** | 80+ engines: Google, Bing, YouTube, Baidu | Scholar, multi-engine coverage |
 | **[Perplexity](https://perplexity.ai/)** | AI-powered answers with citations (Sonar Pro) | Complex queries, synthesized answers |
+| **[You.com](https://you.com/platform)** | Web + news search API (`/v1/agents/search`) | General web search and news fallback |
 | **Browserless** | Cloud browser for Cloudflare/JS-heavy pages | Anti-bot bypass, dynamic rendering |
 | **Stealth** | Built-in anti-bot scraper | Protected pages, no API key needed |
 | **[xAI](https://x.ai/)** | X/Twitter search via Grok AI | Tweets, trending topics, social sentiment |
@@ -240,6 +241,11 @@ export SEARCH_KEYS_SERPAPI=your-key
 export SEARCH_KEYS_PERPLEXITY=your-key
 export SEARCH_KEYS_BROWSERLESS=your-key
 export SEARCH_KEYS_XAI=your-key
+export SEARCH_KEYS_YOU=your-key
+
+# You.com aliases also supported
+export YDC_API_KEY=your-key
+export YOU_API_KEY=your-key
 ```
 
 ## Updating

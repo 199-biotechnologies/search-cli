@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
     name = "search",
     version,
     about = "Agent-friendly multi-provider search CLI",
-    long_about = "Aggregates 11 search providers with 14 search modes.\n\
+    long_about = "Aggregates 12 search providers with 14 search modes.\n\
         Auto-detects intent from your query and routes to the best providers.\n\
         Outputs colored tables for humans, JSON when piped to other tools.\n\n\
         PROVIDERS:\n  \
@@ -21,6 +21,7 @@ use clap::{Parser, Subcommand};
           browserless Cloud browser for Cloudflare/JS-heavy pages\n  \
           stealth    Anti-bot stealth scraper\n  \
           xai        X/Twitter social search via xAI Grok\n\n\
+          you        You.com web and news search (YDC API)\n\n\
         EXAMPLES:\n  \
           search \"rust error handling\"                    # auto-detect mode\n  \
           search search -q \"CRISPR\" -m academic           # academic papers\n  \
@@ -115,7 +116,7 @@ pub struct SearchArgs {
     #[arg(short, long)]
     pub count: Option<usize>,
 
-    /// Use only specific providers (comma-separated: brave,serper,exa,jina,firecrawl,tavily,serpapi,perplexity,browserless,stealth,xai)
+    /// Use only specific providers (comma-separated: parallel,brave,serper,exa,jina,firecrawl,tavily,serpapi,perplexity,browserless,stealth,xai,you)
     #[arg(short, long, value_delimiter = ',')]
     pub providers: Option<Vec<String>>,
 
