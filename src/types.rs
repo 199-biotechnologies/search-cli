@@ -6,9 +6,9 @@ use std::fmt;
 pub enum Mode {
     /// Auto-detect intent from query (default)
     Auto,
-    /// General web search (Brave + Serper + Exa + Jina + Tavily + Perplexity)
+    /// General web search (Brave + Serper + Exa + Jina + Tavily + Perplexity + You.com)
     General,
-    /// Breaking news and current events (Brave + Serper + Tavily + Perplexity)
+    /// Breaking news and current events (Brave + Serper + Tavily + Perplexity + You.com)
     News,
     /// Research papers and studies (Exa + Serper + Tavily + Perplexity)
     Academic,

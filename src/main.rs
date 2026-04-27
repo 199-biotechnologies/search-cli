@@ -49,6 +49,7 @@ async fn main() {
             "api.jina.ai:443",
             "api.tavily.com:443",
             "api.perplexity.ai:443",
+            "api.you.com:443",
         ];
         for domain in domains {
             let _ = lookup_host(domain).await;
@@ -136,6 +137,7 @@ async fn main() {
                 "https://api.search.brave.com/res/v1/web/search",
                 "https://google.serper.dev/search",
                 "https://api.exa.ai/search",
+                "https://api.you.com/v1/agents/search",
             ];
             for url in urls {
                 let _ = app_c.client.head(url).send().await;
@@ -445,7 +447,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                              "description": "Search mode"},
                             {"name": "-c/--count", "type": "integer", "required": false, "description": "Number of results"},
                             {"name": "-p/--providers", "type": "string[]", "required": false,
-                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai"],
+                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai","you"],
                              "description": "Comma-separated provider list"},
                             {"name": "-d/--domain", "type": "string[]", "required": false, "description": "Include only these domains"},
                             {"name": "--exclude-domain", "type": "string[]", "required": false, "description": "Exclude these domains"},
