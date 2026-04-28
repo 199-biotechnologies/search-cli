@@ -89,17 +89,63 @@ pub fn render(response: &SearchResponse) {
     }
 
     if !response.metadata.providers_failed.is_empty() {
+        let failed_summary = if !response.metadata.providers_failed_detail.is_empty() {
+            response
+                .metadata
+                .providers_failed_detail
+                .iter()
+                .map(|d| format!("{}({})", d.provider, d.reason))
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            response.metadata.providers_failed.join(", ")
+        };
+
         if use_color {
             eprintln!(
                 "  {} {}",
                 "failed:".red(),
-                response.metadata.providers_failed.join(", ").red()
+                failed_summary.red()
             );
         } else {
             eprintln!(
                 "  failed: {}",
-                response.metadata.providers_failed.join(", ")
+                failed_summary
             );
+        }
+
+        let mut remediation_actions = response
+            .metadata
+            .providers_failed_detail
+            .iter()
+            .filter_map(|d| d.action.clone())
+            .collect::<Vec<_>>();
+        remediation_actions.sort();
+        remediation_actions.dedup();
+
+        if !remediation_actions.is_empty() {
+            if use_color {
+                eprintln!("  {} {}", "Try:".yellow(), remediation_actions.join(" | ").yellow());
+            } else {
+                eprintln!("  Try: {}", remediation_actions.join(" | "));
+            }
+        }
+
+        let mut signatures = response
+            .metadata
+            .providers_failed_detail
+            .iter()
+            .filter_map(|d| d.signature.clone())
+            .collect::<Vec<_>>();
+        signatures.sort();
+        signatures.dedup();
+
+        if !signatures.is_empty() {
+            if use_color {
+                eprintln!("  {} {}", "diag:".dimmed(), signatures.join(", ").dimmed());
+            } else {
+                eprintln!("  diag: {}", signatures.join(", "));
+            }
         }
     }
     eprintln!();

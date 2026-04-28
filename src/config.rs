@@ -3,8 +3,52 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
+
+/// Deserialize a u64 that tolerates legacy quoted numeric strings (e.g., timeout = "77").
+/// Coercion is only applied to string values that parse as u64; other strings fail clearly.
+fn deserialize_u64_tolerant<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum RawU64 {
+        Native(u64),
+        Quoted(String),
+    }
+
+    let raw = RawU64::deserialize(deserializer)?;
+    match raw {
+        RawU64::Native(v) => Ok(v),
+        RawU64::Quoted(s) => s.parse::<u64>().map_err(|e| {
+            serde::de::Error::custom(format!("invalid numeric value: '{}' - {}", s, e))
+        }),
+    }
+}
+
+/// Deserialize a usize that tolerates legacy quoted numeric strings (e.g., count = "15").
+/// Coercion is only applied to string values that parse as usize; other strings fail clearly.
+fn deserialize_usize_tolerant<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum RawUsize {
+        Native(usize),
+        Quoted(String),
+    }
+
+    let raw = RawUsize::deserialize(deserializer)?;
+    match raw {
+        RawUsize::Native(v) => Ok(v),
+        RawUsize::Quoted(s) => s.parse::<usize>().map_err(|e| {
+            serde::de::Error::custom(format!("invalid numeric value: '{}' - {}", s, e))
+        }),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -36,22 +80,29 @@ pub struct ApiKeys {
     pub browserless: String,
     #[serde(default)]
     pub xai: String,
+    #[serde(default)]
+    pub you: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(default = "default_timeout")]
+    #[serde(default = "default_timeout", deserialize_with = "deserialize_u64_tolerant")]
     pub timeout: u64,
-    #[serde(default = "default_count")]
+    #[serde(default = "default_count", deserialize_with = "deserialize_usize_tolerant")]
     pub count: usize,
+    #[serde(default = "default_retry_count", deserialize_with = "deserialize_usize_tolerant")]
+    pub retry_count: usize,
+    #[serde(default = "default_min_results", deserialize_with = "deserialize_usize_tolerant")]
+    pub min_results: usize,
+    #[serde(default = "default_provider_timeout", deserialize_with = "deserialize_u64_tolerant")]
+    pub provider_timeout: u64,
 }
 
-fn default_timeout() -> u64 {
-    10
-}
-fn default_count() -> usize {
-    10
-}
+fn default_timeout() -> u64 { 30 }
+fn default_count() -> usize { 10 }
+fn default_retry_count() -> usize { 3 }
+fn default_min_results() -> usize { 0 }
+fn default_provider_timeout() -> u64 { 0 }
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -68,10 +119,14 @@ impl Default for AppConfig {
                 perplexity: String::new(),
                 browserless: String::new(),
                 xai: String::new(),
+                you: String::new(),
             },
             settings: Settings {
                 timeout: default_timeout(),
                 count: default_count(),
+                retry_count: default_retry_count(),
+                min_results: default_min_results(),
+                provider_timeout: default_provider_timeout(),
             },
         }
     }
@@ -85,9 +140,16 @@ pub fn config_dir() -> PathBuf {
     }
 }
 
+/// Cross-platform home directory: $HOME on Unix, %USERPROFILE% on Windows.
+pub fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
 fn dirs_fallback() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".config").join("search")
+    home_dir().join(".config").join("search")
 }
 
 pub fn config_path() -> PathBuf {
@@ -140,6 +202,7 @@ pub fn config_show(config: &AppConfig) {
         ("perplexity", &config.keys.perplexity,  "PERPLEXITY_API_KEY"),
         ("browserless",&config.keys.browserless,  "BROWSERLESS_API_KEY"),
         ("xai",        &config.keys.xai,         "XAI_API_KEY"),
+        ("you",        &config.keys.you,         "YOU_API_KEY"),
     ];
 
     if c { println!("  {}", "[keys]".bold()); } else { println!("[keys]"); }
@@ -185,6 +248,7 @@ pub fn config_set(key: &str, value: &str) -> Result<(), crate::errors::SearchErr
     let parts: Vec<&str> = key.split('.').collect();
     match parts.len() {
         1 => {
+            // Top-level keys are strings by convention (e.g., keys.*)
             doc.insert(parts[0].to_string(), toml::Value::String(value.to_string()));
         }
         2 => {
@@ -192,7 +256,56 @@ pub fn config_set(key: &str, value: &str) -> Result<(), crate::errors::SearchErr
                 .entry(parts[0])
                 .or_insert_with(|| toml::Value::Table(toml::Table::new()));
             if let toml::Value::Table(t) = section {
-                t.insert(parts[1].to_string(), toml::Value::String(value.to_string()));
+                // Typed handling for settings.* fields
+                if parts[0] == "settings" {
+                    match parts[1] {
+                        "timeout" => {
+                            // timeout is u64 in AppConfig; validate and store as integer
+                            match value.parse::<u64>() {
+                                Ok(vu) => {
+                                    if vu <= i64::MAX as u64 {
+                                        t.insert(parts[1].to_string(), toml::Value::Integer(vu as i64));
+                                    } else {
+                                        return Err(crate::errors::SearchError::Config(format!(
+                                            "Value for {key} is too large"
+                                        )));
+                                    }
+                                }
+                                Err(_) => {
+                                    return Err(crate::errors::SearchError::Config(format!(
+                                        "Invalid numeric value for {key}: {value}"
+                                    )));
+                                }
+                            }
+                        }
+                        "count" => {
+                            // count is usize in AppConfig; validate and store as integer
+                            match value.parse::<usize>() {
+                                Ok(vc) => {
+                                    // Convert usize -> i64 safely
+                                    let vi = i64::try_from(vc).map_err(|_| {
+                                        crate::errors::SearchError::Config(format!(
+                                            "Value for {key} is too large"
+                                        ))
+                                    })?;
+                                    t.insert(parts[1].to_string(), toml::Value::Integer(vi));
+                                }
+                                Err(_) => {
+                                    return Err(crate::errors::SearchError::Config(format!(
+                                        "Invalid numeric value for {key}: {value}"
+                                    )));
+                                }
+                            }
+                        }
+                        _ => {
+                            // Unknown setting — store as string to be conservative
+                            t.insert(parts[1].to_string(), toml::Value::String(value.to_string()));
+                        }
+                    }
+                } else {
+                    // Other sections: store values as strings by default
+                    t.insert(parts[1].to_string(), toml::Value::String(value.to_string()));
+                }
             }
         }
         _ => {
@@ -228,6 +341,7 @@ pub fn config_check(config: &AppConfig) {
         ("perplexity",  &config.keys.perplexity,   "PERPLEXITY_API_KEY",  "AI-powered answers with citations (Perplexity Sonar)"),
         ("browserless", &config.keys.browserless,   "BROWSERLESS_API_KEY", "Cloud browser for Cloudflare/JS-heavy pages"),
         ("xai",         &config.keys.xai,          "XAI_API_KEY",         "X/Twitter social search via xAI Grok"),
+        ("you",         &config.keys.you,          "YOU_API_KEY",         "LLM-ready web and news search"),
     ];
 
     if c {

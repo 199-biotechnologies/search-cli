@@ -10,27 +10,64 @@ pub mod serper;
 pub mod stealth;
 pub mod tavily;
 pub mod xai;
+pub mod you;
 
 use crate::context::AppContext;
 use crate::errors::SearchError;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
+use tl::ParserOptions;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Append `site:` / `-site:` domain filters to a query string.
+/// Shared by brave, serper, and you providers.
+pub fn augment_query(query: &str, opts: &SearchOpts) -> String {
+    let mut q = query.to_string();
+    for d in &opts.include_domains {
+        q = format!("{q} site:{d}");
+    }
+    for d in &opts.exclude_domains {
+        q = format!("{q} -site:{d}");
+    }
+    q
+}
+
+/// Extract the `<title>` text from an HTML document.
+/// Shared by stealth and browserless providers.
+pub fn extract_title(html: &str) -> Option<String> {
+    let dom = tl::parse(html, ParserOptions::default()).ok()?;
+    let parser = dom.parser();
+    let mut titles = dom.query_selector("title")?;
+    let node = titles.next()?.get(parser)?;
+    let text = node.inner_text(parser).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
 
 pub async fn retry_request<F, Fut, T>(f: F) -> Result<T, SearchError>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, SearchError>>,
 {
+    let mut attempt = 0;
     f.retry(
         ExponentialBuilder::default()
-            .with_min_delay(Duration::from_secs(1))
-            .with_max_delay(Duration::from_secs(4))
-            .with_max_times(3),
+        .with_min_delay(Duration::from_secs(1))
+        .with_max_delay(Duration::from_secs(4))
+        .with_max_times(3),
     )
-    .when(|e| matches!(e, SearchError::Http(_)))
+    .notify(|e: &SearchError, dur| {
+            attempt += 1;
+            tracing::info!(
+                event = "provider_retry",
+                attempt = attempt,
+                delay_ms = dur.as_millis() as u64,
+                reason_code = e.error_code(),
+                message = %e
+            );
+        })
+    .when(|e| matches!(e, SearchError::Http(_) | SearchError::Wreq(_)))
     .await
 }
 
@@ -49,9 +86,6 @@ pub trait Provider: Send + Sync {
     fn is_configured(&self) -> bool;
     /// Standard env var names accepted by this provider (e.g. BRAVE_API_KEY).
     fn env_keys(&self) -> &[&'static str];
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(10)
-    }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError>;
     async fn search_news(&self, query: &str, count: usize, opts: &SearchOpts)
@@ -72,5 +106,6 @@ pub fn build_providers(ctx: &Arc<AppContext>) -> Vec<Box<dyn Provider>> {
         Box::new(perplexity::Perplexity::new(ctx.clone())),
         Box::new(serpapi::SerpApi::new(ctx.clone())),
         Box::new(xai::Xai::new(ctx.clone())),
+        Box::new(you::You::new(ctx.clone())),
     ]
 }

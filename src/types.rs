@@ -86,6 +86,23 @@ pub struct ResponseMetadata {
     pub result_count: usize,
     pub providers_queried: Vec<String>,
     pub providers_failed: Vec<String>,
+    #[serde(default)]
+    pub providers_failed_detail: Vec<ProviderFailureDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderFailureDetail {
+    pub provider: String,
+    pub reason: String,
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -107,6 +124,21 @@ pub struct ErrorResponse {
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,
+    pub cause: Option<String>,
+    pub action: Option<String>,
+    pub signature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+}
+
+/// Map human-readable freshness ("day", "week", "month", "year") to
+/// provider-specific period codes. Shared by brave and you providers.
+pub fn map_freshness(f: &str) -> &str {
+    match f {
+        "day" => "pd",
+        "week" => "pw",
+        "month" => "pm",
+        "year" => "py",
+        other => other, // pass through if already in provider format
+    }
 }

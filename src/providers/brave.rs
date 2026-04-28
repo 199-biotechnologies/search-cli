@@ -1,10 +1,10 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
-use crate::types::{SearchOpts, SearchResult};
+use crate::providers::augment_query;
+use crate::types::{map_freshness, SearchOpts, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Brave {
     ctx: Arc<AppContext>,
@@ -17,6 +17,13 @@ impl Brave {
 
     fn api_key(&self) -> String {
         super::resolve_key(&self.ctx.config.keys.brave, "BRAVE_API_KEY")
+    }
+
+    fn base_url(&self) -> String {
+        std::env::var("BRAVE_BASE_URL")
+            .unwrap_or_else(|_| "https://api.search.brave.com".to_string())
+            .trim_end_matches('/')
+            .to_string()
     }
 }
 
@@ -52,29 +59,6 @@ struct BraveNewsResult {
     age: Option<String>,
 }
 
-/// Brave freshness: pd (day), pw (week), pm (month), py (year)
-fn map_freshness(f: &str) -> &str {
-    match f {
-        "day" => "pd",
-        "week" => "pw",
-        "month" => "pm",
-        "year" => "py",
-        other => other, // pass through if already in Brave format
-    }
-}
-
-/// Append site: operators for domain filtering
-fn augment_query(query: &str, opts: &SearchOpts) -> String {
-    let mut q = query.to_string();
-    for d in &opts.include_domains {
-        q = format!("{q} site:{d}");
-    }
-    for d in &opts.exclude_domains {
-        q = format!("{q} -site:{d}");
-    }
-    q
-}
-
 #[async_trait]
 impl super::Provider for Brave {
     fn name(&self) -> &'static str {
@@ -93,9 +77,6 @@ impl super::Provider for Brave {
         !self.api_key().is_empty()
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(10)
-    }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         if !self.is_configured() {
@@ -104,13 +85,14 @@ impl super::Provider for Brave {
 
         let client = &self.ctx.client;
         let api_key = self.api_key();
+        let endpoint = format!("{}/res/v1/web/search", self.base_url());
         let count_str = count.to_string();
         let q = augment_query(query, opts);
         let freshness = opts.freshness.as_deref().map(map_freshness);
 
         super::retry_request(|| async {
             let mut req = client
-                .get("https://api.search.brave.com/res/v1/web/search")
+                .get(&endpoint)
                 .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[("q", q.as_str()), ("count", &count_str), ("extra_snippets", "true")]);
@@ -177,13 +159,14 @@ impl super::Provider for Brave {
 
         let client = &self.ctx.client;
         let api_key = self.api_key();
+        let endpoint = format!("{}/res/v1/news/search", self.base_url());
         let count_str = count.to_string();
         let q = augment_query(query, opts);
         let freshness = opts.freshness.as_deref().map(map_freshness);
 
         super::retry_request(|| async {
             let mut req = client
-                .get("https://api.search.brave.com/res/v1/news/search")
+                .get(&endpoint)
                 .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[("q", q.as_str()), ("count", &count_str)]);
@@ -241,13 +224,14 @@ impl Brave {
 
         let client = &self.ctx.client;
         let api_key = self.api_key();
+        let endpoint = format!("{}/res/v1/llm/context", self.base_url());
         let q = augment_query(query, opts);
         let count_str = count.to_string();
         let freshness = opts.freshness.as_deref().map(map_freshness);
 
         super::retry_request(|| async {
             let mut req = client
-                .get("https://api.search.brave.com/res/v1/llm/context")
+                .get(&endpoint)
                 .header("X-Subscription-Token", api_key.as_str())
                 .header("Accept", "application/json")
                 .query(&[

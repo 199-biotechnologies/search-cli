@@ -9,6 +9,7 @@ mod logging;
 mod output;
 mod providers;
 mod types;
+mod utils;
 mod verify;
 
 use clap::Parser;
@@ -18,6 +19,7 @@ use context::AppContext;
 use output::{Ctx, OutputFormat};
 use std::sync::Arc;
 use tokio::net::lookup_host;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -37,8 +39,33 @@ fn has_json_flag() -> bool {
     false
 }
 
+fn init_tracing() {
+    // Quiet by default unless caller explicitly opts in.
+    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
+    if rust_log.trim().is_empty() {
+        return;
+    }
+
+    let filter = EnvFilter::try_new(rust_log).unwrap_or_else(|_| EnvFilter::new("info"));
+    let fmt_layer = fmt::layer()
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time()
+        .with_ansi(false)
+        .with_writer(std::io::stderr);
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .try_init();
+}
+
 #[tokio::main]
 async fn main() {
+    init_tracing();
+    crate::cache::evict_expired();
+
     // 1. Pre-emptive DNS resolution (starts immediately in background)
     tokio::spawn(async {
         let domains = [
@@ -125,7 +152,14 @@ async fn main() {
         }
     };
 
-    let app = Arc::new(AppContext::new(config));
+    let app = match AppContext::new(config) {
+        Ok(ctx) => Arc::new(ctx),
+        Err(e) => {
+            eprintln!("Failed to initialize app: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!(event = "app_initialized", timeout_s = app.config.settings.timeout, default_count = app.config.settings.count);
 
     // 6. Pre-emptive TLS Handshake
     let is_search = cli.command.is_none() || matches!(cli.command, Some(Commands::Search(_)));
@@ -146,6 +180,7 @@ async fn main() {
     let exit_code = match run(cli, &ctx, app).await {
         Ok(code) => code,
         Err(e) => {
+            tracing::warn!(event = "search_failed", code = e.error_code(), message = %e);
             if ctx.is_json() {
                 output::json::render_error(&e);
             } else {
@@ -219,6 +254,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                     return Ok(0);
                 } else {
                     let err = errors::SearchError::Config("No cached results found. Run a search first.".into());
+                    tracing::warn!(event = "search_failed", code = err.error_code(), message = %err);
                     if ctx.is_json() {
                         output::json::render_error(&err);
                     } else {
@@ -232,13 +268,14 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
             if let Some(ref providers) = args.providers {
                 const KNOWN: &[&str] = &[
                     "parallel", "brave", "serper", "exa", "jina", "firecrawl", "tavily",
-                    "serpapi", "perplexity", "browserless", "stealth", "xai",
+                    "serpapi", "perplexity", "browserless", "stealth", "xai", "you",
                 ];
                 for p in providers {
                     if !KNOWN.iter().any(|k| k.eq_ignore_ascii_case(p)) {
                         let err = errors::SearchError::Config(format!(
                             "Unknown provider '{}'. Valid: {}", p, KNOWN.join(", ")
                         ));
+                        tracing::warn!(event = "search_failed", code = err.error_code(), message = %err);
                         if ctx.is_json() {
                             output::json::render_error(&err);
                         } else {
@@ -308,6 +345,16 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
 
             let response = response?;
 
+            tracing::info!(
+                event = "search_completed",
+                mode = %response.mode,
+                status = %response.status,
+                elapsed_ms = response.metadata.elapsed_ms,
+                result_count = response.metadata.result_count,
+                providers_queried = ?response.metadata.providers_queried,
+                providers_failed = ?response.metadata.providers_failed
+            );
+
             cache::save_last(&response);
             cache::save_query(&args.query, &mode_str, &response);
             logging::log_search(&response);
@@ -340,6 +387,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                             ("perplexity", !app.config.keys.perplexity.is_empty()),
                             ("browserless", !app.config.keys.browserless.is_empty()),
                             ("xai", !app.config.keys.xai.is_empty()),
+                            ("you", !app.config.keys.you.is_empty()),
                         ].iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
                         let info = serde_json::json!({
                             "version": "1",
@@ -445,7 +493,7 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                              "description": "Search mode"},
                             {"name": "-c/--count", "type": "integer", "required": false, "description": "Number of results"},
                             {"name": "-p/--providers", "type": "string[]", "required": false,
-                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai"],
+                             "values": ["parallel","brave","serper","exa","jina","firecrawl","tavily","serpapi","perplexity","browserless","stealth","xai","you"],
                              "description": "Comma-separated provider list"},
                             {"name": "-d/--domain", "type": "string[]", "required": false, "description": "Include only these domains"},
                             {"name": "--exclude-domain", "type": "string[]", "required": false, "description": "Exclude these domains"},
@@ -610,7 +658,13 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
             }
 
             let start = std::time::Instant::now();
-            let results = verify::verify_emails(&emails).await;
+            let results = match verify::verify_emails(&emails).await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return Ok(2);
+                }
+            };
             let elapsed = start.elapsed().as_millis();
 
             let valid_count = results.iter().filter(|r| r.verdict == "valid").count();
