@@ -152,7 +152,13 @@ async fn main() {
         }
     };
 
-    let app = Arc::new(AppContext::new(config));
+    let app = match AppContext::new(config) {
+        Ok(ctx) => Arc::new(ctx),
+        Err(e) => {
+            eprintln!("Failed to initialize app: {e}");
+            std::process::exit(1);
+        }
+    };
     tracing::info!(event = "app_initialized", timeout_s = app.config.settings.timeout, default_count = app.config.settings.count);
 
     // 6. Pre-emptive TLS Handshake
@@ -652,7 +658,13 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
             }
 
             let start = std::time::Instant::now();
-            let results = verify::verify_emails(&emails).await;
+            let results = match verify::verify_emails(&emails).await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return Ok(2);
+                }
+            };
             let elapsed = start.elapsed().as_millis();
 
             let valid_count = results.iter().filter(|r| r.verdict == "valid").count();

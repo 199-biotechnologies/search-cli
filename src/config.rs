@@ -90,14 +90,19 @@ pub struct Settings {
     pub timeout: u64,
     #[serde(default = "default_count", deserialize_with = "deserialize_usize_tolerant")]
     pub count: usize,
+    #[serde(default = "default_retry_count", deserialize_with = "deserialize_usize_tolerant")]
+    pub retry_count: usize,
+    #[serde(default = "default_min_results", deserialize_with = "deserialize_usize_tolerant")]
+    pub min_results: usize,
+    #[serde(default = "default_provider_timeout", deserialize_with = "deserialize_u64_tolerant")]
+    pub provider_timeout: u64,
 }
 
-fn default_timeout() -> u64 {
-    10
-}
-fn default_count() -> usize {
-    10
-}
+fn default_timeout() -> u64 { 30 }
+fn default_count() -> usize { 10 }
+fn default_retry_count() -> usize { 3 }
+fn default_min_results() -> usize { 0 }
+fn default_provider_timeout() -> u64 { 0 }
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -119,6 +124,9 @@ impl Default for AppConfig {
             settings: Settings {
                 timeout: default_timeout(),
                 count: default_count(),
+                retry_count: default_retry_count(),
+                min_results: default_min_results(),
+                provider_timeout: default_provider_timeout(),
             },
         }
     }

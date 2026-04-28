@@ -1081,13 +1081,13 @@ fn test_failure_metadata_includes_api_reason_and_legacy_list() {
         .expect("metadata.providers_failed_detail should be an array");
     assert!(!details.is_empty(), "providers_failed_detail should not be empty");
 
-    let stealth_detail = details
+    let browserless_detail = details
         .iter()
         .find(|d| d["provider"].as_str() == Some("browserless"))
         .expect("expected browserless detail entry");
 
-    assert_eq!(stealth_detail["reason"], "api");
-    let code = stealth_detail["code"].as_str().unwrap_or_default();
+    assert_eq!(browserless_detail["reason"], "api");
+    let code = browserless_detail["code"].as_str().unwrap_or_default();
     assert!(
         matches!(code, "api_error" | "invalid_url" | "http_error" | "extraction_error"),
         "unexpected API-class code: {}",

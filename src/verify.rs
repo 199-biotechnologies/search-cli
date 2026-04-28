@@ -2,12 +2,15 @@ use hickory_resolver::Resolver;
 use owo_colors::OwoColorize;
 use serde::Serialize;
 use std::io::IsTerminal;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
 
 const SMTP_TIMEOUT: Duration = Duration::from_secs(10);
 const GREYLIST_DELAY: Duration = Duration::from_secs(5);
+const MAX_CONCURRENT_VERIFICATIONS: usize = 5;
 
 const DISPOSABLE_DOMAINS: &[&str] = &[
     "mailinator.com", "guerrillamail.com", "tempmail.com", "throwaway.email",
@@ -35,16 +38,52 @@ pub struct VerifyResult {
     pub suggestion: String,
 }
 
-pub async fn verify_emails(emails: &[String]) -> Vec<VerifyResult> {
+pub async fn verify_emails(emails: &[String]) -> Result<Vec<VerifyResult>, String> {
     let resolver = Resolver::builder_tokio()
-        .expect("failed to create DNS resolver")
+        .map_err(|e| format!("failed to create DNS resolver: {}", e))?
         .build();
 
-    let mut results = Vec::with_capacity(emails.len());
-    for email in emails {
-        results.push(verify_one(&resolver, email).await);
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_VERIFICATIONS));
+    let mut handles = Vec::with_capacity(emails.len());
+
+    for email in emails.iter().cloned().collect::<Vec<_>>() {
+        let resolver = resolver.clone();
+        let sem = Arc::clone(&semaphore);
+
+        handles.push(tokio::spawn(async move {
+            let permit = sem.acquire_owned().await
+                .map_err(|e| format!("semaphore acquire error: {}", e))?;
+            let result = verify_one(&resolver, &email).await;
+            drop(permit);
+            Ok::<_, String>(result)
+        }));
     }
-    results
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.await {
+            Ok(Ok(r)) => results.push(r),
+            Ok(Err(e)) => results.push(VerifyResult {
+                email: String::new(),
+                verdict: "internal_error".to_string(),
+                smtp_code: 0,
+                mx_host: String::new(),
+                is_catch_all: false,
+                is_disposable: false,
+                suggestion: e,
+            }),
+            Err(_) => results.push(VerifyResult {
+                email: String::new(),
+                verdict: "internal_error".to_string(),
+                smtp_code: 0,
+                mx_host: String::new(),
+                is_catch_all: false,
+                is_disposable: false,
+                suggestion: "Task cancelled".to_string(),
+            }),
+        }
+    }
+    Ok(results)
 }
 
 async fn verify_one(resolver: &hickory_resolver::TokioResolver, email: &str) -> VerifyResult {

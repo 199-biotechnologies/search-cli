@@ -27,6 +27,33 @@ fn providers_for_mode(mode: Mode) -> &'static [&'static str] {
     }
 }
 
+/// Count active (configured) providers for a mode.
+fn active_provider_count(ctx: &AppContext, mode: Mode, _only_providers: &Option<Vec<String>>) -> usize {
+    if _only_providers.is_some() {
+        return _only_providers.as_ref().map(|v| v.len()).unwrap_or(0);
+    }
+    // Count configured providers for this mode
+    let wanted = providers_for_mode(mode);
+    let mut count = 0;
+    for name in wanted {
+        let configured = match *name {
+            "parallel" | "stealth" | "jina" | "firecrawl" | "tavily" | "browserless" => true,
+            "brave" => !ctx.config.keys.brave.is_empty(),
+            "serper" => !ctx.config.keys.serper.is_empty(),
+            "exa" => !ctx.config.keys.exa.is_empty(),
+            "serpapi" => !ctx.config.keys.serpapi.is_empty(),
+            "perplexity" => !ctx.config.keys.perplexity.is_empty(),
+            "xai" => !ctx.config.keys.xai.is_empty(),
+            "you" => !ctx.config.keys.you.is_empty(),
+            _ => false,
+        };
+        if configured {
+            count += 1;
+        }
+    }
+    count
+}
+
 pub async fn execute_search(
     ctx: Arc<AppContext>,
     query: &str,
@@ -37,7 +64,18 @@ pub async fn execute_search(
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
     let query_arc: Arc<str> = Arc::from(query);
-    let timeout_budget = Duration::from_secs(ctx.config.settings.timeout.max(1));
+    let global_timeout = ctx.config.settings.timeout.max(1);
+    let min_results = ctx.config.settings.min_results;
+
+    // Calculate per-provider timeout: use provider_timeout if set, otherwise divide global by provider count
+    let per_provider_timeout = if ctx.config.settings.provider_timeout > 0 {
+        Duration::from_secs(ctx.config.settings.provider_timeout)
+    } else {
+        // Default: divide global timeout among providers, minimum 5s each
+        let active_count = active_provider_count(&ctx, mode, only_providers);
+        let calculated = global_timeout / active_count.max(1) as u64;
+        Duration::from_secs(calculated.max(5))
+    };
 
     // Speculative Execution: If in Auto mode, we don't wait for classification 
     // to start the most likely providers (Brave, Serper).
@@ -52,7 +90,7 @@ pub async fn execute_search(
             let o = opts.clone();
             let p = providers::brave::Brave::new(ctx.clone());
             speculative_set.spawn(async move {
-                ("brave", timeout(timeout_budget, p.search(&q, c, &o)).await)
+                ("brave", timeout(per_provider_timeout, p.search(&q, c, &o)).await)
             });
         }
         if !ctx.config.keys.serper.is_empty() {
@@ -61,7 +99,7 @@ pub async fn execute_search(
             let o = opts.clone();
             let p = providers::serper::Serper::new(ctx.clone());
             speculative_set.spawn(async move {
-                ("serper", timeout(timeout_budget, p.search(&q, c, &o)).await)
+                ("serper", timeout(per_provider_timeout, p.search(&q, c, &o)).await)
             });
         }
     }
@@ -124,7 +162,7 @@ pub async fn execute_search(
         let o = opts.clone();
         let brave = providers::brave::Brave::new(ctx.clone());
         set.spawn(async move {
-            let result = timeout(timeout_budget, brave.search_llm_context(&q, c, &o)).await;
+            let result = timeout(per_provider_timeout, brave.search_llm_context(&q, c, &o)).await;
             ("brave_llm_context", result)
         });
         providers_queried.push("brave_llm_context".to_string());
@@ -140,13 +178,13 @@ pub async fn execute_search(
         match resolved_mode {
             Mode::News => {
                 set.spawn(async move {
-                    let result = timeout(timeout_budget, provider.search_news(&q, c, &sopts)).await;
+                    let result = timeout(per_provider_timeout, provider.search_news(&q, c, &sopts)).await;
                     (name, result)
                 });
             }
             _ => {
                 set.spawn(async move {
-                    let result = timeout(timeout_budget, provider.search(&q, c, &sopts)).await;
+                    let result = timeout(per_provider_timeout, provider.search(&q, c, &sopts)).await;
                     (name, result)
                 });
             }
@@ -216,12 +254,18 @@ Ok((name, Ok(Err(e)))) => {
                 providers_failed.push(name.to_string());
                 providers_failed_detail.push(failure_detail_timeout(name));
             }
-            Err(e) => {
+Err(e) => {
                 // JoinError from abort — not a real failure
                 if !e.is_cancelled() {
                     tracing::error!("join error: {e}");
                 }
             }
+        }
+        // Early termination if min_results reached (but not if count is also min_results)
+        if min_results > 0 && all_results.len() >= min_results && min_results < count {
+            tracing::info!(event = "early_termination", reason = "min_results_reached", count = all_results.len(), min_results = min_results);
+            set.abort_all();
+            break;
         }
     }
 
@@ -268,7 +312,7 @@ fn finalize_response(mut response: SearchResponse) -> SearchResponse {
 async fn try_provider<Fut>(
     name: &str,
     fut: Fut,
-    timeout_budget: Duration,
+    per_provider_timeout: Duration,
     results: &mut Vec<SearchResult>,
     providers_queried: &mut Vec<String>,
     providers_failed: &mut Vec<String>,
@@ -277,7 +321,7 @@ async fn try_provider<Fut>(
     Fut: std::future::Future<Output = Result<Vec<SearchResult>, SearchError>>,
 {
     providers_queried.push(name.to_string());
-    match tokio::time::timeout(timeout_budget, fut).await {
+    match tokio::time::timeout(per_provider_timeout, fut).await {
         Ok(Ok(items)) => results.extend(items),
         Ok(Err(e)) => {
             providers_failed.push(name.to_string());
@@ -401,7 +445,14 @@ pub async fn execute_special(
     _opts: &SearchOpts,
 ) -> Result<SearchResponse, SearchError> {
     let start = Instant::now();
-    let timeout_budget = Duration::from_secs(ctx.config.settings.timeout.max(1));
+    let global_timeout = ctx.config.settings.timeout.max(1);
+    let timeout_budget = Duration::from_secs(global_timeout);
+    // Calculate per-provider timeout
+    let per_provider_timeout = if ctx.config.settings.provider_timeout > 0 {
+        Duration::from_secs(ctx.config.settings.provider_timeout)
+    } else {
+        Duration::from_secs(global_timeout.max(5))
+    };
     let mut results = Vec::new();
     let mut providers_queried = Vec::new();
     let mut providers_failed = Vec::new();
@@ -412,54 +463,54 @@ pub async fn execute_special(
             let serper = providers::serper::Serper::new(ctx.clone());
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
-                try_provider("serper", serper.search_scholar(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("serper", serper.search_scholar(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
             let serpapi = providers::serpapi::SerpApi::new(ctx.clone());
             if serpapi.is_configured() && provider_allowed("serpapi", only_providers) {
                 let pc = clamp_provider_count("serpapi", count);
-                try_provider("serpapi", serpapi.search_scholar(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("serpapi", serpapi.search_scholar(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::Patents => {
             let serper = providers::serper::Serper::new(ctx.clone());
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
-                try_provider("serper", serper.search_patents(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("serper", serper.search_patents(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::Images => {
             let serper = providers::serper::Serper::new(ctx.clone());
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
-                try_provider("serper", serper.search_images(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("serper", serper.search_images(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::Places => {
             let serper = providers::serper::Serper::new(ctx.clone());
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
-                try_provider("serper", serper.search_places(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("serper", serper.search_places(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::People => {
             let exa = providers::exa::Exa::new(ctx.clone());
             if exa.is_configured() && provider_allowed("exa", only_providers) {
                 let pc = clamp_provider_count("exa", count);
-                try_provider("exa", exa.search_people(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("exa", exa.search_people(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::Similar => {
             let exa = providers::exa::Exa::new(ctx.clone());
             if exa.is_configured() && provider_allowed("exa", only_providers) {
                 let pc = clamp_provider_count("exa", count);
-                try_provider("exa", exa.find_similar(query, pc), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("exa", exa.find_similar(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::Social => {
             let xai = providers::xai::Xai::new(ctx.clone());
             if xai.is_configured() && provider_allowed("xai", only_providers) {
                 let pc = clamp_provider_count("xai", count);
-                try_provider("xai", xai.search(query, pc, _opts), timeout_budget, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                try_provider("xai", xai.search(query, pc, _opts), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
             }
         }
         Mode::Scrape | Mode::Extract => {
