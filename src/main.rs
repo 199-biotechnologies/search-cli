@@ -376,18 +376,19 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
             match action {
                 ConfigAction::Show => {
                     if ctx.is_json() {
-                        let configured: Vec<&str> = [
-                            ("brave", !app.config.keys.brave.is_empty()),
-                            ("serper", !app.config.keys.serper.is_empty()),
-                            ("exa", !app.config.keys.exa.is_empty()),
-                            ("jina", !app.config.keys.jina.is_empty()),
-                            ("firecrawl", !app.config.keys.firecrawl.is_empty()),
-                            ("tavily", !app.config.keys.tavily.is_empty()),
-                            ("serpapi", !app.config.keys.serpapi.is_empty()),
-                            ("perplexity", !app.config.keys.perplexity.is_empty()),
-                            ("browserless", !app.config.keys.browserless.is_empty()),
-                            ("xai", !app.config.keys.xai.is_empty()),
-                            ("you", !app.config.keys.you.is_empty()),
+                    let configured: Vec<&str> = [
+                        ("parallel", !app.config.keys.parallel.is_empty()),
+                        ("brave", !app.config.keys.brave.is_empty()),
+                        ("serper", !app.config.keys.serper.is_empty()),
+                        ("exa", !app.config.keys.exa.is_empty()),
+                        ("jina", !app.config.keys.jina.is_empty()),
+                        ("firecrawl", !app.config.keys.firecrawl.is_empty()),
+                        ("tavily", !app.config.keys.tavily.is_empty()),
+                        ("serpapi", !app.config.keys.serpapi.is_empty()),
+                        ("perplexity", !app.config.keys.perplexity.is_empty()),
+                        ("browserless", !app.config.keys.browserless.is_empty()),
+                        ("xai", !app.config.keys.xai.is_empty()),
+                        ("you", !app.config.keys.you.is_empty()),
                         ].iter().filter(|(_, v)| *v).map(|(k, _)| *k).collect();
                         let info = serde_json::json!({
                             "version": "1",
@@ -484,10 +485,9 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                 "command_schemas": {
                     "search": {
                         "description": "Search across providers",
-                        "args": [
-                            {"name": "-q/--query", "type": "string", "required": true, "description": "Search query"},
-                        ],
+                        "args": [],
                         "options": [
+                            {"name": "-q/--query", "type": "string", "required": true, "description": "Search query"},
                             {"name": "-m/--mode", "type": "string", "required": false, "default": "auto",
                              "values": ["auto","general","news","academic","people","deep","extract","similar","scrape","scholar","patents","images","places","social"],
                              "description": "Search mode"},
