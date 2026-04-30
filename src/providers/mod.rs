@@ -212,16 +212,16 @@ mod tests {
         // tl parser should return the first title
         let html = "<html><head><title>First</title><title>Second</title></head></html>";
         let result = extract_title(html);
-        // Just verify it extracts something
-        assert!(result.is_some());
+        assert_eq!(result, Some("First".to_string()));
     }
 
     #[test]
     fn test_extract_title_malformed() {
         let html = "<html><head><title>Unclosed";
         let result = extract_title(html);
-        // Should handle gracefully
-        assert!(result.is_none() || result.is_some());
+        // Unclosed title tag — tl parser may or may not extract; accept both
+        // but at least verify it doesn't panic
+        assert!(result.is_none() || result == Some("Unclosed".to_string()));
     }
 
     #[tokio::test]

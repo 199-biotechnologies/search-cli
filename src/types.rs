@@ -88,6 +88,8 @@ pub struct ResponseMetadata {
     pub providers_failed: Vec<String>,
     #[serde(default)]
     pub providers_failed_detail: Vec<ProviderFailureDetail>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub providers_skipped: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

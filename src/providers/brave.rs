@@ -106,10 +106,23 @@ impl super::Provider for Brave {
             if resp.status() == 429 {
                 return Err(SearchError::RateLimited { provider: "brave" });
             }
-            if !resp.status().is_success() {
+            if resp.status() == 422 {
                 return Err(SearchError::Api {
                     provider: "brave",
-                    code: "api_error",
+                    code: "invalid_request",
+                    message: format!("HTTP 422: Invalid request parameters (possible malformed query or unsupported options)"),
+                });
+            }
+            if !resp.status().is_success() {
+                let code = match resp.status().as_u16() {
+                    400 => "bad_request",
+                    403 => "forbidden",
+                    500..=599 => "server_error",
+                    _ => "api_error",
+                };
+                return Err(SearchError::Api {
+                    provider: "brave",
+                    code,
                     message: format!("HTTP {}", resp.status()),
                 });
             }
@@ -177,10 +190,26 @@ impl super::Provider for Brave {
 
             let resp = req.send().await?;
 
-            if !resp.status().is_success() {
+            if resp.status() == 429 {
+                return Err(SearchError::RateLimited { provider: "brave" });
+            }
+            if resp.status() == 422 {
                 return Err(SearchError::Api {
                     provider: "brave",
-                    code: "api_error",
+                    code: "invalid_request",
+                    message: format!("HTTP 422: Invalid request parameters (possible malformed query or unsupported options)"),
+                });
+            }
+            if !resp.status().is_success() {
+                let code = match resp.status().as_u16() {
+                    400 => "bad_request",
+                    403 => "forbidden",
+                    500..=599 => "server_error",
+                    _ => "api_error",
+                };
+                return Err(SearchError::Api {
+                    provider: "brave",
+                    code,
                     message: format!("HTTP {}", resp.status()),
                 });
             }

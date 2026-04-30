@@ -82,6 +82,26 @@ impl SearchError {
                 action: "Configure provider API key via env var or `search config set keys.<provider> ...`.",
                 signature: "provider.auth_missing",
             }),
+            Self::Api { code: "invalid_request", .. } => Some(RejectionClassification {
+                cause: "invalid_request",
+                action: "Check query parameters, count limits, or unsupported options for this provider.",
+                signature: "provider.invalid_request",
+            }),
+            Self::Api { code: "bad_request", .. } => Some(RejectionClassification {
+                cause: "bad_request",
+                action: "Verify query syntax and parameters are valid for this provider.",
+                signature: "provider.bad_request",
+            }),
+            Self::Api { code: "forbidden", .. } => Some(RejectionClassification {
+                cause: "forbidden",
+                action: "Check API key is valid and has not expired. Verify key permissions.",
+                signature: "provider.forbidden",
+            }),
+            Self::Api { code: "server_error", .. } => Some(RejectionClassification {
+                cause: "server_error",
+                action: "Provider is experiencing issues. Retry later or switch providers.",
+                signature: "provider.server_error",
+            }),
             Self::Api { .. } | Self::Http(_) | Self::Wreq(_) => Some(RejectionClassification {
                 cause: "provider_api_error",
                 action: "Retry with another provider or adjust query/mode parameters.",
@@ -182,6 +202,30 @@ impl SearchError {
                 cause: "auth_missing",
                 action: "Configure provider API key via env var or `search config set keys.<provider> ...`.",
                 signature: "provider.auth_missing",
+            }),
+            // HTTP 422 - Invalid request parameters
+            (_, "invalid_request") => Some(RejectionClassification {
+                cause: "invalid_request",
+                action: "Check query parameters, count limits, or unsupported options for this provider.",
+                signature: "provider.invalid_request",
+            }),
+            // HTTP 400 - Bad request
+            (_, "bad_request") => Some(RejectionClassification {
+                cause: "bad_request",
+                action: "Verify query syntax and parameters are valid for this provider.",
+                signature: "provider.bad_request",
+            }),
+            // HTTP 403 - Forbidden (invalid/missing API key)
+            (_, "forbidden") => Some(RejectionClassification {
+                cause: "forbidden",
+                action: "Check API key is valid and has not expired. Verify key permissions.",
+                signature: "provider.forbidden",
+            }),
+            // HTTP 500+ - Server errors
+            (_, "server_error") => Some(RejectionClassification {
+                cause: "server_error",
+                action: "Provider is experiencing issues. Retry later or switch providers.",
+                signature: "provider.server_error",
             }),
             _ => None,
         }

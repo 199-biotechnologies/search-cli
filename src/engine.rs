@@ -126,21 +126,34 @@ pub async fn execute_search(
     let all_providers = providers::build_providers(&ctx);
     let wanted = providers_for_mode(resolved_mode);
 
-    let active: Vec<Box<dyn Provider>> = all_providers
-        .into_iter()
-        .filter(|p| {
-            let name = p.name();
-            // Don't restart speculative ones (they already launched above)
-            if is_auto && only_providers.is_none() && (name == "brave" || name == "serper") { return false; }
-            
-            let in_mode_set = wanted.contains(&name);
-            let in_filter = only_providers
-                .as_ref()
-                .map(|list| list.iter().any(|f| f.eq_ignore_ascii_case(name)))
-                .unwrap_or(true);
-            (in_mode_set || only_providers.is_some()) && in_filter && p.is_configured()
-        })
-        .collect();
+    let mut active: Vec<Box<dyn Provider>> = Vec::new();
+    for p in all_providers {
+        let name = p.name();
+        // Don't restart speculative ones (they already launched above)
+        if is_auto && only_providers.is_none() && (name == "brave" || name == "serper") { continue; }
+
+        let in_mode_set = wanted.contains(&name);
+        let in_filter = only_providers
+            .as_ref()
+            .map(|list| list.iter().any(|f| f.eq_ignore_ascii_case(name)))
+            .unwrap_or(true);
+
+        if !in_mode_set && only_providers.is_none() {
+            // Provider not in the wanted set for this mode
+            if !p.is_configured() {
+                providers_skipped.push(name.to_string());
+            }
+            continue;
+        }
+        if !in_filter {
+            continue;
+        }
+        if !p.is_configured() {
+            providers_skipped.push(name.to_string());
+            continue;
+        }
+        active.push(p);
+    }
 
     if active.is_empty() && speculative_set.is_empty() {
         return Err(SearchError::NoProviders(resolved_mode.to_string()));
@@ -148,11 +161,20 @@ pub async fn execute_search(
 
     let mut set = JoinSet::new();
     let mut providers_queried = Vec::new();
+    let mut providers_skipped = Vec::new();
 
     // Re-add speculative ones to the tracking list (only if they weren't aborted)
     if is_auto && only_providers.is_none() && spec_compatible {
-        if !ctx.config.keys.brave.is_empty() { providers_queried.push("brave".to_string()); }
-        if !ctx.config.keys.serper.is_empty() { providers_queried.push("serper".to_string()); }
+        if !ctx.config.keys.brave.is_empty() {
+            providers_queried.push("brave".to_string());
+        } else {
+            providers_skipped.push("brave".to_string());
+        }
+        if !ctx.config.keys.serper.is_empty() {
+            providers_queried.push("serper".to_string());
+        } else {
+            providers_skipped.push("serper".to_string());
+        }
     }
 
     // For Deep mode, also launch Brave LLM Context API in parallel
@@ -297,6 +319,7 @@ Err(e) => {
             providers_queried,
             providers_failed,
             providers_failed_detail,
+            providers_skipped,
         },
     }))
 }
@@ -457,6 +480,7 @@ pub async fn execute_special(
     let mut providers_queried = Vec::new();
     let mut providers_failed = Vec::new();
     let mut providers_failed_detail = Vec::new();
+    let mut providers_skipped = Vec::new();
 
     match mode {
         Mode::Scholar => {
@@ -464,11 +488,15 @@ pub async fn execute_special(
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
                 try_provider("serper", serper.search_scholar(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("serper".to_string());
             }
             let serpapi = providers::serpapi::SerpApi::new(ctx.clone());
             if serpapi.is_configured() && provider_allowed("serpapi", only_providers) {
                 let pc = clamp_provider_count("serpapi", count);
                 try_provider("serpapi", serpapi.search_scholar(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("serpapi".to_string());
             }
         }
         Mode::Patents => {
@@ -476,6 +504,8 @@ pub async fn execute_special(
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
                 try_provider("serper", serper.search_patents(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("serper".to_string());
             }
         }
         Mode::Images => {
@@ -483,6 +513,8 @@ pub async fn execute_special(
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
                 try_provider("serper", serper.search_images(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("serper".to_string());
             }
         }
         Mode::Places => {
@@ -490,6 +522,8 @@ pub async fn execute_special(
             if serper.is_configured() && provider_allowed("serper", only_providers) {
                 let pc = clamp_provider_count("serper", count);
                 try_provider("serper", serper.search_places(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("serper".to_string());
             }
         }
         Mode::People => {
@@ -497,6 +531,8 @@ pub async fn execute_special(
             if exa.is_configured() && provider_allowed("exa", only_providers) {
                 let pc = clamp_provider_count("exa", count);
                 try_provider("exa", exa.search_people(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("exa".to_string());
             }
         }
         Mode::Similar => {
@@ -504,6 +540,8 @@ pub async fn execute_special(
             if exa.is_configured() && provider_allowed("exa", only_providers) {
                 let pc = clamp_provider_count("exa", count);
                 try_provider("exa", exa.find_similar(query, pc), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("exa".to_string());
             }
         }
         Mode::Social => {
@@ -511,6 +549,8 @@ pub async fn execute_special(
             if xai.is_configured() && provider_allowed("xai", only_providers) {
                 let pc = clamp_provider_count("xai", count);
                 try_provider("xai", xai.search(query, pc, _opts), per_provider_timeout, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+            } else {
+                providers_skipped.push("xai".to_string());
             }
         }
         Mode::Scrape | Mode::Extract => {
@@ -528,6 +568,8 @@ pub async fn execute_special(
                 if jina.is_configured() && provider_allowed("jina", only_providers) {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     try_provider_remaining("jina", jina.read_url(query), remaining, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                } else {
+                    providers_skipped.push("jina".to_string());
                 }
             }
             if results.is_empty() {
@@ -535,6 +577,8 @@ pub async fn execute_special(
                 if fc.is_configured() && provider_allowed("firecrawl", only_providers) {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     try_provider_remaining("firecrawl", fc.scrape_url(query), remaining, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                } else {
+                    providers_skipped.push("firecrawl".to_string());
                 }
             }
             if results.is_empty() {
@@ -542,6 +586,8 @@ pub async fn execute_special(
                 if bl.is_configured() && provider_allowed("browserless", only_providers) {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     try_provider_remaining("browserless", bl.scrape_url(query), remaining, &mut results, &mut providers_queried, &mut providers_failed, &mut providers_failed_detail).await;
+                } else {
+                    providers_skipped.push("browserless".to_string());
                 }
             }
         }
@@ -576,6 +622,7 @@ pub async fn execute_special(
             providers_queried,
             providers_failed,
             providers_failed_detail,
+            providers_skipped,
         },
     }))
 }
