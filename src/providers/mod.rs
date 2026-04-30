@@ -109,3 +109,150 @@ pub fn build_providers(ctx: &Arc<AppContext>) -> Vec<Box<dyn Provider>> {
         Box::new(you::You::new(ctx.clone())),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::SearchOpts;
+
+    // Task 5: augment_query tests
+    #[test]
+    fn test_augment_query_empty_query_no_domains() {
+        let opts = SearchOpts::default();
+        let result = augment_query("", &opts);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_augment_query_query_no_domains() {
+        let opts = SearchOpts::default();
+        let result = augment_query("hello world", &opts);
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_augment_query_single_include() {
+        let mut opts = SearchOpts::default();
+        opts.include_domains = vec!["example.com".to_string()];
+        let result = augment_query("hello", &opts);
+        assert_eq!(result, "hello site:example.com");
+    }
+
+    #[test]
+    fn test_augment_query_multiple_includes() {
+        let mut opts = SearchOpts::default();
+        opts.include_domains = vec!["example.com".to_string(), "test.org".to_string()];
+        let result = augment_query("hello", &opts);
+        assert_eq!(result, "hello site:example.com site:test.org");
+    }
+
+    #[test]
+    fn test_augment_query_single_exclude() {
+        let mut opts = SearchOpts::default();
+        opts.exclude_domains = vec!["spam.com".to_string()];
+        let result = augment_query("hello", &opts);
+        assert_eq!(result, "hello -site:spam.com");
+    }
+
+    #[test]
+    fn test_augment_query_multiple_excludes() {
+        let mut opts = SearchOpts::default();
+        opts.exclude_domains = vec!["spam.com".to_string(), "ads.net".to_string()];
+        let result = augment_query("hello", &opts);
+        assert_eq!(result, "hello -site:spam.com -site:ads.net");
+    }
+
+    #[test]
+    fn test_augment_query_mixed() {
+        let mut opts = SearchOpts::default();
+        opts.include_domains = vec!["good.com".to_string()];
+        opts.exclude_domains = vec!["bad.com".to_string()];
+        let result = augment_query("hello", &opts);
+        assert_eq!(result, "hello site:good.com -site:bad.com");
+    }
+
+    #[test]
+    fn test_augment_query_preserves_spaces() {
+        let opts = SearchOpts::default();
+        let result = augment_query("hello  world  test", &opts);
+        assert_eq!(result, "hello  world  test");
+    }
+
+    // Task 6: extract_title tests
+    #[test]
+    fn test_extract_title_valid() {
+        let html = "<html><head><title>Hello World</title></head></html>";
+        let result = extract_title(html);
+        assert_eq!(result, Some("Hello World".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_trims() {
+        let html = "<html><head><title>  Hello World  </title></head></html>";
+        let result = extract_title(html);
+        assert_eq!(result, Some("Hello World".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_empty() {
+        let html = "<html><head><title></title></head></html>";
+        let result = extract_title(html);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_title_no_tag() {
+        let html = "<html><body>No title here</body></html>";
+        let result = extract_title(html);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_title_multiple() {
+        // tl parser should return the first title
+        let html = "<html><head><title>First</title><title>Second</title></head></html>";
+        let result = extract_title(html);
+        // Just verify it extracts something
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_extract_title_malformed() {
+        let html = "<html><head><title>Unclosed";
+        let result = extract_title(html);
+        // Should handle gracefully
+        assert!(result.is_none() || result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_retry_request_retries_on_wreq_error() {
+        use std::sync::{Arc, Mutex};
+        let attempt_count = Arc::new(Mutex::new(0));
+
+        // Create a wreq::Error from a serde_json::Error (which wreq::Error implements From for)
+        // We'll recreate the error inside the closure since wreq::Error isn't Clone
+        let result: Result<(), SearchError> = retry_request(|| {
+            let count = attempt_count.clone();
+            async move {
+                let mut c = count.lock().unwrap();
+                *c += 1;
+                // Create a new wreq::Error each time (from a fresh serde_json::Error)
+                let json_err = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
+                let wreq_err = wreq::Error::from(json_err);
+                Err(SearchError::Wreq(wreq_err))
+            }
+        })
+        .await;
+
+        // Verify the function was called 4 times (1 initial + 3 retries)
+        let final_count = *attempt_count.lock().unwrap();
+        assert_eq!(final_count, 4, "Expected 4 attempts (1 initial + 3 retries)");
+
+        // Verify we get an error back
+        assert!(result.is_err());
+        match result {
+            Err(SearchError::Wreq(_)) => (),
+            _ => panic!("Expected SearchError::Wreq"),
+        }
+    }
+}

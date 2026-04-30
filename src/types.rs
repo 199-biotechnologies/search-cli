@@ -142,3 +142,48 @@ pub fn map_freshness(f: &str) -> &str {
         other => other, // pass through if already in provider format
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Task 7: map_freshness tests
+    #[test]
+    fn test_map_freshness_day() {
+        assert_eq!(map_freshness("day"), "pd");
+    }
+
+    #[test]
+    fn test_map_freshness_week() {
+        assert_eq!(map_freshness("week"), "pw");
+    }
+
+    #[test]
+    fn test_map_freshness_month() {
+        assert_eq!(map_freshness("month"), "pm");
+    }
+
+    #[test]
+    fn test_map_freshness_year() {
+        assert_eq!(map_freshness("year"), "py");
+    }
+
+    #[test]
+    fn test_map_freshness_passthrough_code() {
+        // Already in provider format, should pass through
+        assert_eq!(map_freshness("pd"), "pd");
+    }
+
+    #[test]
+    fn test_map_freshness_passthrough_unknown() {
+        // Unknown string, should pass through
+        assert_eq!(map_freshness("unknown"), "unknown");
+    }
+
+    #[test]
+    fn test_map_freshness_empty() {
+        // Empty string, should pass through
+        assert_eq!(map_freshness(""), "");
+    }
+}
+
