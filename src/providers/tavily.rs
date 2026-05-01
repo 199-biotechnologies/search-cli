@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Tavily {
     ctx: Arc<AppContext>,
@@ -32,7 +31,6 @@ impl Tavily {
         }
 
         let mut body = json!({
-            "api_key": self.api_key(),
             "query": query,
             "search_depth": "advanced",
             "topic": topic,
@@ -55,6 +53,7 @@ impl Tavily {
         let resp = super::retry_request(|| async {
             let r = client
                 .post("https://api.tavily.com/search")
+                .header("Authorization", format!("Bearer {}", self.api_key()))
                 .json(&body)
                 .send()
                 .await?;
@@ -124,7 +123,6 @@ impl super::Provider for Tavily {
     fn capabilities(&self) -> &[&'static str] { &["general", "news", "academic", "deep"] }
     fn env_keys(&self) -> &[&'static str] { &["TAVILY_API_KEY", "SEARCH_KEYS_TAVILY"] }
     fn is_configured(&self) -> bool { !self.api_key().is_empty() }
-    fn timeout(&self) -> Duration { Duration::from_secs(15) }
 
     async fn search(&self, query: &str, count: usize, opts: &SearchOpts) -> Result<Vec<SearchResult>, SearchError> {
         self.do_search(query, count, "general", opts).await

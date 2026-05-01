@@ -3,7 +3,6 @@ use crate::errors::SearchError;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct SerpApi {
     ctx: Arc<AppContext>,
@@ -158,9 +157,6 @@ impl super::Provider for SerpApi {
     }
     fn is_configured(&self) -> bool {
         !self.api_key().is_empty()
-    }
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(10)
     }
 
     async fn search(

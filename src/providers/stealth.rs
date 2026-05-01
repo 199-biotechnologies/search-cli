@@ -1,9 +1,10 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
+use crate::providers::extract_title;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
-use rquest::header::{HeaderMap, HeaderValue};
-use rquest_util::Emulation;
+use wreq::header::{HeaderMap, HeaderValue};
+use wreq_util::Emulation;
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
@@ -17,8 +18,9 @@ impl Stealth {
         Self { _ctx: ctx }
     }
 
-    /// Build an rquest client that impersonates Chrome with full TLS fingerprint
-    fn build_client() -> Result<rquest::Client, SearchError> {
+    /// Build a wreq client that impersonates Chrome with full TLS fingerprint.
+    /// Timeout is sourced from unified config timeout budget.
+    fn build_client(timeout_secs: u64) -> Result<wreq::Client, SearchError> {
         let mut headers = HeaderMap::new();
 
         // Chrome 136 stealth headers (matches Scrapling's browserforge output)
@@ -61,10 +63,10 @@ impl Stealth {
             HeaderValue::from_static("gzip, deflate, br"),
         );
 
-        rquest::Client::builder()
+        wreq::Client::builder()
             .emulation(Emulation::Chrome136)
             .default_headers(headers)
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| SearchError::Config(format!("Failed to build stealth client: {e}")))
     }
@@ -78,9 +80,49 @@ impl Stealth {
     }
 
     pub async fn scrape_url(&self, url_str: &str) -> Result<Vec<SearchResult>, SearchError> {
-        let client = Self::build_client()?;
-        let url =
-            Url::parse(url_str).map_err(|e| SearchError::Config(format!("Invalid URL: {e}")))?;
+        let client = Self::build_client(self._ctx.config.settings.timeout)?;
+        let url = match Url::parse(url_str) {
+            Ok(u) => u,
+            Err(e) => return Err(SearchError::Config(format!("Invalid URL: {e}"))),
+        };
+
+        // Validate URL to prevent SSRF against internal services
+        let host = url.host_str().unwrap_or_default();
+
+        // Only allow https URLs
+        if url.scheme() != "https" {
+            return Err(SearchError::Api {
+                provider: "stealth",
+                code: "invalid_url",
+                message: "Only HTTPS URLs are supported for scraping".into(),
+            });
+        }
+
+        // Block private/internal IP ranges
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            let is_internal = match ip {
+                std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_multicast(),
+                std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_multicast(),
+            };
+            if is_internal {
+                return Err(SearchError::Api {
+                    provider: "stealth",
+                    code: "forbidden",
+                    message: format!("SSRF: blocking internal IP address: {host}"),
+                });
+            }
+        }
+
+        // Block suspicious hostnames that look like private IPs
+        if host.starts_with("127.") || host.starts_with("192.168.")
+            || host.starts_with("10.") || host.ends_with(".internal")
+        {
+            return Err(SearchError::Api {
+                provider: "stealth",
+                code: "forbidden",
+                message: format!("SSRF: blocking internal hostname: {host}"),
+            });
+        }
 
         // Set referer to look like we came from Google (Scrapling technique)
         let mut req = client.get(url.clone());
@@ -88,9 +130,9 @@ impl Stealth {
             req = req.header("Referer", referer);
         }
 
-        let resp = req.send().await.map_err(|e| {
-            SearchError::Config(format!("Stealth request failed: {e}"))
-        })?;
+    let resp = req.send().await.map_err(|e| {
+        SearchError::Api { provider: "stealth", code: "http_error", message: format!("Stealth request failed: {e}") }
+    })?;
 
         if !resp.status().is_success() {
             return Err(SearchError::Api {
@@ -100,30 +142,23 @@ impl Stealth {
             });
         }
 
-        let final_url = url_str.to_string(); // use original URL (rquest may not expose final URL)
-        let html_bytes = resp.bytes().await.map_err(|e| {
-            SearchError::Config(format!("Failed to read body: {e}"))
-        })?;
+        let final_url = url_str.to_string(); // use original URL (wreq may not expose final URL)
+    let html_bytes = resp.bytes().await.map_err(|e| {
+        SearchError::Api { provider: "stealth", code: "read_error", message: format!("Failed to read body: {e}") }
+    })?;
         let html = String::from_utf8_lossy(&html_bytes).into_owned();
 
-        // Try readability first, fallback to raw text extraction
-        let (title, text) = {
-            let mut cursor = std::io::Cursor::new(html.as_bytes());
-            match readability::extractor::extract(&mut cursor, &url) {
-                Ok(article) if !article.text.trim().is_empty() => {
-                    let title = if article.title.is_empty() {
-                        url_str.to_string()
-                    } else {
-                        article.title
-                    };
-                    (title, article.text)
-                }
-                _ => {
-                    // Readability failed or returned empty — fallback
-                    (url_str.to_string(), extract_text_fallback(&html))
-                }
-            }
-        };
+    // Offload extraction to blocking pool so heavy HTML parsing doesn't block
+    // the async runtime worker. Uses tl-based extraction (no readability/reqwest).
+    let html_for_extract = html;
+    let fallback_title = url_str.to_string();
+    let (title, text) = tokio::task::spawn_blocking(move || {
+        let title = extract_title(&html_for_extract).unwrap_or_else(|| fallback_title.clone());
+        let body = extract_text_fallback(&html_for_extract);
+        (title, body)
+    })
+    .await
+    .map_err(|e| SearchError::Api { provider: "stealth", code: "extraction_error", message: format!("Stealth extraction task failed: {e}") })?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -203,9 +238,6 @@ impl super::Provider for Stealth {
         true // No API key needed — local scraper
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(30)
-    }
 
     async fn search(
         &self,

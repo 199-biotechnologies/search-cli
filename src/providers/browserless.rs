@@ -1,9 +1,9 @@
 use crate::context::AppContext;
 use crate::errors::SearchError;
+use crate::providers::extract_title;
 use crate::types::{SearchOpts, SearchResult};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct Browserless {
     ctx: Arc<AppContext>,
@@ -16,6 +16,22 @@ impl Browserless {
 
     fn api_key(&self) -> String {
         super::resolve_key(&self.ctx.config.keys.browserless, "BROWSERLESS_API_KEY")
+    }
+
+    fn classify_rejection(status: reqwest::StatusCode, body_text: &str) -> Option<SearchError> {
+        // Browserless signature for key/endpoint auth mode mismatch.
+        let lower = body_text.to_lowercase();
+        let mismatch = lower.contains("auth")
+            && lower.contains("mode")
+            && lower.contains("mismatch");
+        if status == reqwest::StatusCode::INTERNAL_SERVER_ERROR && mismatch {
+            return Some(SearchError::Api {
+                provider: "browserless",
+                code: "auth_mode_mismatch",
+                message: "Browserless auth mode mismatch between key and endpoint".to_string(),
+            });
+        }
+        None
     }
 
     /// Scrape a URL using Browserless cloud browser (handles Cloudflare, JS rendering)
@@ -51,10 +67,17 @@ impl Browserless {
                 });
             }
             if !r.status().is_success() {
+                let status = r.status();
+                let body_text = r.text().await.unwrap_or_default();
+
+                if let Some(classified) = Self::classify_rejection(status, &body_text) {
+                    return Err(classified);
+                }
+
                 return Err(SearchError::Api {
                     provider: "browserless",
                     code: "api_error",
-                    message: format!("HTTP {}", r.status()),
+                    message: format!("HTTP {}", status),
                 });
             }
 
@@ -62,25 +85,21 @@ impl Browserless {
         })
         .await?;
 
-        // resp is fully rendered HTML — extract with readability
-        let parsed_url = url::Url::parse(url).map_err(|e| SearchError::Api {
-            provider: "browserless",
-            code: "invalid_url",
-            message: format!("Invalid URL '{}': {}", url, e),
-        })?;
-
-        let mut cursor = std::io::Cursor::new(resp.as_bytes());
-        let (title, text) = match readability::extractor::extract(&mut cursor, &parsed_url) {
-            Ok(article) if !article.text.trim().is_empty() => {
-                let title = if article.title.is_empty() {
-                    url.to_string()
-                } else {
-                    article.title
-                };
-                (title, article.text)
-            }
-            _ => (url.to_string(), extract_text_simple(&resp)),
-        };
+    // Offload extraction to blocking pool so heavy HTML parsing doesn't block
+    // the async runtime worker. Uses tl-based extraction (no readability/reqwest).
+    let resp_for_extract = resp;
+    let fallback_title = url.to_string();
+    let (title, text) = tokio::task::spawn_blocking(move || {
+        let title = extract_title(&resp_for_extract).unwrap_or_else(|| fallback_title.clone());
+        let body = extract_text_simple(&resp_for_extract);
+        (title, body)
+    })
+    .await
+    .map_err(|e| SearchError::Api {
+        provider: "browserless",
+        code: "extraction_error",
+        message: format!("Browserless extraction task failed: {e}"),
+    })?;
 
         if text.trim().is_empty() {
             return Err(SearchError::Api {
@@ -102,17 +121,39 @@ impl Browserless {
     }
 }
 
-/// Simple HTML tag stripper
+/// Simple HTML tag stripper that skips `<script>` and `<style>` content
 fn extract_text_simple(html: &str) -> String {
     let mut text = String::with_capacity(html.len() / 3);
     let mut in_tag = false;
-    for c in html.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => text.push(c),
+    let mut in_skip = false;
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => {
+                in_tag = true;
+                let rest = &html[i..];
+                if rest.len() > 7
+                    && (rest[..7].eq_ignore_ascii_case("<script")
+                        || rest[..6].eq_ignore_ascii_case("<style"))
+                {
+                    in_skip = true;
+                }
+                if in_skip
+                    && rest.len() > 8
+                    && (rest[..9].eq_ignore_ascii_case("</script>")
+                        || rest[..8].eq_ignore_ascii_case("</style>"))
+                {
+                    in_skip = false;
+                }
+            }
+            b'>' => {
+                in_tag = false;
+            }
+            _ if !in_tag && !in_skip => text.push(bytes[i] as char),
             _ => {}
         }
+        i += 1;
     }
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -132,9 +173,6 @@ impl super::Provider for Browserless {
         !self.api_key().is_empty()
     }
 
-    fn timeout(&self) -> Duration {
-        Duration::from_secs(30)
-    }
 
     async fn search(
         &self,
@@ -152,5 +190,63 @@ impl super::Provider for Browserless {
         _opts: &SearchOpts,
     ) -> Result<Vec<SearchResult>, SearchError> {
         Ok(vec![])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_rejection_auth_mode_mismatch() {
+        let err = Browserless::classify_rejection(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "Auth mode mismatch detected between token and endpoint",
+        )
+        .expect("expected classified rejection");
+
+        match err {
+            SearchError::Api { code, .. } => assert_eq!(code, "auth_mode_mismatch"),
+            _ => panic!("expected SearchError::Api"),
+        }
+    }
+
+    #[test]
+    fn test_classify_rejection_none_for_other_errors() {
+        let err = Browserless::classify_rejection(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "generic server failure",
+        );
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn test_extract_text_simple_skips_script() {
+        let html = "<p>Hello</p><script>alert('xss')</script><p>World</p>";
+        let text = extract_text_simple(html);
+        assert!(!text.contains("alert"), "script content should be excluded");
+        assert!(!text.contains("xss"), "script content should be excluded");
+    }
+
+    #[test]
+    fn test_extract_text_simple_skips_style() {
+        let html = "<p>Hello</p><style>body { color: red; }</style><p>World</p>";
+        let text = extract_text_simple(html);
+        assert!(!text.contains("color"), "style content should be excluded");
+        assert!(!text.contains("red"), "style content should be excluded");
+    }
+
+    #[test]
+    fn test_extract_text_simple_preserves_visible_text() {
+        let html = "<script>var x = 1;</script><style>.cls{}</style><p>Hello</p>";
+        let text = extract_text_simple(html);
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_extract_text_simple_script_not_in_output() {
+        let html = "<script>alert('xss')</script><p>Hello</p>";
+        let text = extract_text_simple(html);
+        assert_eq!(text, "Hello");
     }
 }
