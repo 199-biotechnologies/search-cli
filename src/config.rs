@@ -165,14 +165,20 @@ pub fn load_config() -> Result<AppConfig, Box<figment::Error>> {
 }
 
 pub fn mask_key(key: &str) -> String {
-    if key.len() <= 8 {
-        if key.is_empty() {
-            "(not set)".to_string()
-        } else {
-            format!("{}***", &key[..2])
-        }
+    if key.is_empty() {
+        "(not set)".to_string()
     } else {
-        format!("{}...{}", &key[..4], &key[key.len() - 4..])
+        redact_key(key)
+    }
+}
+
+/// Redact an API key for safe display.
+/// Shows only first/last 4 chars; masks the middle.
+pub fn redact_key(key: &str) -> String {
+    if key.len() <= 8 {
+        "*".repeat(key.len())
+    } else {
+        format!("{}****{}", &key[..4], &key[key.len() - 4..])
     }
 }
 

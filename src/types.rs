@@ -88,6 +88,7 @@ pub struct ResponseMetadata {
     pub providers_failed: Vec<String>,
     #[serde(default)]
     pub providers_failed_detail: Vec<ProviderFailureDetail>,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub providers_skipped: Vec<String>,
 }
@@ -129,7 +130,6 @@ pub struct ErrorDetail {
     pub cause: Option<String>,
     pub action: Option<String>,
     pub signature: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
 }
 

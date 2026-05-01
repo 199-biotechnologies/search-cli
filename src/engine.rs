@@ -126,6 +126,7 @@ pub async fn execute_search(
     let all_providers = providers::build_providers(&ctx);
     let wanted = providers_for_mode(resolved_mode);
 
+    let mut providers_skipped = Vec::new();
     let mut active: Vec<Box<dyn Provider>> = Vec::new();
     for p in all_providers {
         let name = p.name();
@@ -161,7 +162,6 @@ pub async fn execute_search(
 
     let mut set = JoinSet::new();
     let mut providers_queried = Vec::new();
-    let mut providers_skipped = Vec::new();
 
     // Re-add speculative ones to the tracking list (only if they weren't aborted)
     if is_auto && only_providers.is_none() && spec_compatible {
@@ -393,10 +393,10 @@ async fn try_provider_remaining<Fut>(
 }
 
 fn normalize_url(url: &str) -> String {
-    url.trim_end_matches('/')
-        .replace("http://", "https://")
-        .replace("www.", "")
-        .to_lowercase()
+    let normalized = url.trim_end_matches('/')
+        .replace("http://", "https://");
+    let lowered = normalized.to_lowercase();
+    lowered.replace("www.", "")
 }
 
 fn provider_allowed(name: &str, only: &Option<Vec<String>>) -> bool {
@@ -686,8 +686,8 @@ mod tests {
         assert_eq!(normalize_url("https://example.com/path/"), "https://example.com/path");
         assert_eq!(normalize_url("https://example.com"), "https://example.com");
         assert_eq!(normalize_url("http://www.test.org/page"), "https://test.org/page");
-        // lowercase is applied last, so WWW is lowered after www. strip
-        assert_eq!(normalize_url("http://WWW.Example.COM/"), "https://www.example.com");
+        // to_lowercase() applied before replace("www.", ""), so WWW is lowered then stripped
+        assert_eq!(normalize_url("http://WWW.Example.COM/"), "https://example.com");
         // trailing slash on root
         assert_eq!(normalize_url("https://example.com/"), "https://example.com");
         // query parameters preserved

@@ -81,8 +81,48 @@ impl Stealth {
 
     pub async fn scrape_url(&self, url_str: &str) -> Result<Vec<SearchResult>, SearchError> {
         let client = Self::build_client(self._ctx.config.settings.timeout)?;
-        let url =
-            Url::parse(url_str).map_err(|e| SearchError::Config(format!("Invalid URL: {e}")))?;
+        let url = match Url::parse(url_str) {
+            Ok(u) => u,
+            Err(e) => return Err(SearchError::Config(format!("Invalid URL: {e}"))),
+        };
+
+        // Validate URL to prevent SSRF against internal services
+        let host = url.host_str().unwrap_or_default();
+
+        // Only allow https URLs
+        if url.scheme() != "https" {
+            return Err(SearchError::Api {
+                provider: "stealth",
+                code: "invalid_url",
+                message: "Only HTTPS URLs are supported for scraping".into(),
+            });
+        }
+
+        // Block private/internal IP ranges
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            let is_internal = match ip {
+                std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_multicast(),
+                std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_multicast(),
+            };
+            if is_internal {
+                return Err(SearchError::Api {
+                    provider: "stealth",
+                    code: "forbidden",
+                    message: format!("SSRF: blocking internal IP address: {host}"),
+                });
+            }
+        }
+
+        // Block suspicious hostnames that look like private IPs
+        if host.starts_with("127.") || host.starts_with("192.168.")
+            || host.starts_with("10.") || host.ends_with(".internal")
+        {
+            return Err(SearchError::Api {
+                provider: "stealth",
+                code: "forbidden",
+                message: format!("SSRF: blocking internal hostname: {host}"),
+            });
+        }
 
         // Set referer to look like we came from Google (Scrapling technique)
         let mut req = client.get(url.clone());

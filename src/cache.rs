@@ -63,7 +63,7 @@ fn now_secs() -> u64 {
 ///
 /// We intentionally skip caching failure artifacts so repeated queries do not
 /// replay stale failed/degraded-empty responses.
-fn should_cache_query_response(response: &SearchResponse) -> bool {
+pub fn should_cache_query_response(response: &SearchResponse) -> bool {
     // Explicit provider-failure terminal state.
     if response.status == "all_providers_failed" {
         return false;
@@ -170,6 +170,7 @@ mod tests {
                 providers_queried: vec![],
                 providers_failed: failed,
                 providers_failed_detail: vec![],
+                providers_skipped: vec![],
             },
         }
     }

@@ -31,7 +31,6 @@ impl Tavily {
         }
 
         let mut body = json!({
-            "api_key": self.api_key(),
             "query": query,
             "search_depth": "advanced",
             "topic": topic,
@@ -54,6 +53,7 @@ impl Tavily {
         let resp = super::retry_request(|| async {
             let r = client
                 .post("https://api.tavily.com/search")
+                .header("Authorization", format!("Bearer {}", self.api_key()))
                 .json(&body)
                 .send()
                 .await?;

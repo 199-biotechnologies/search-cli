@@ -355,8 +355,11 @@ async fn run(cli: Cli, ctx: &Ctx, app: Arc<AppContext>) -> Result<i32, errors::S
                 providers_failed = ?response.metadata.providers_failed
             );
 
-            cache::save_last(&response);
-            cache::save_query(&args.query, &mode_str, &response);
+            // Only cache responses that are useful to replay (skip failed/degraded)
+            if cache::should_cache_query_response(&response) {
+                cache::save_last(&response);
+                cache::save_query(&args.query, &mode_str, &response);
+            }
             logging::log_search(&response);
 
             if ctx.is_json() {

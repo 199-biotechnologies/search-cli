@@ -44,27 +44,29 @@ pub async fn verify_emails(emails: &[String]) -> Result<Vec<VerifyResult>, Strin
         .build();
 
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_VERIFICATIONS));
-    let mut handles = Vec::with_capacity(emails.len());
+    let emails_owned: Vec<String> = emails.to_vec();
+    let mut handles = Vec::with_capacity(emails_owned.len());
 
-    for email in emails.iter().cloned().collect::<Vec<_>>() {
+    for (idx, email) in emails_owned.iter().enumerate() {
         let resolver = resolver.clone();
         let sem = Arc::clone(&semaphore);
+        let email = email.clone();
 
-        handles.push(tokio::spawn(async move {
+        handles.push((idx, tokio::spawn(async move {
             let permit = sem.acquire_owned().await
                 .map_err(|e| format!("semaphore acquire error: {}", e))?;
             let result = verify_one(&resolver, &email).await;
             drop(permit);
             Ok::<_, String>(result)
-        }));
+        })));
     }
 
     let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
+    for (idx, handle) in handles {
         match handle.await {
             Ok(Ok(r)) => results.push(r),
             Ok(Err(e)) => results.push(VerifyResult {
-                email: String::new(),
+                email: emails_owned[idx].clone(),
                 verdict: "internal_error".to_string(),
                 smtp_code: 0,
                 mx_host: String::new(),
@@ -73,7 +75,7 @@ pub async fn verify_emails(emails: &[String]) -> Result<Vec<VerifyResult>, Strin
                 suggestion: e,
             }),
             Err(_) => results.push(VerifyResult {
-                email: String::new(),
+                email: emails_owned[idx].clone(),
                 verdict: "internal_error".to_string(),
                 smtp_code: 0,
                 mx_host: String::new(),

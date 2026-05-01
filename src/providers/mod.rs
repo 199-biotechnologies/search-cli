@@ -26,12 +26,29 @@ use std::time::Duration;
 pub fn augment_query(query: &str, opts: &SearchOpts) -> String {
     let mut q = query.to_string();
     for d in &opts.include_domains {
-        q = format!("{q} site:{d}");
+        let sanitized = sanitize_domain(d);
+        q.push_str(&format!(" site:{}", sanitized));
     }
     for d in &opts.exclude_domains {
-        q = format!("{q} -site:{d}");
+        let sanitized = sanitize_domain(d);
+        q.push_str(&format!(" -site:{}", sanitized));
     }
     q
+}
+
+/// Sanitize a domain string before injecting into a search query.
+/// Rejects CRLF, spaces, quotes, operators (OR, AND, NOT) to prevent injection.
+fn sanitize_domain(domain: &str) -> String {
+    let forbidden = ['\r', '\n', '"', '\'', ' ', '(', ')', ';'];
+    if domain.chars().any(|c| forbidden.contains(&c))
+        || domain.contains(" OR ")
+        || domain.contains(" AND ")
+        || domain.contains(" NOT ")
+    {
+        tracing::warn!(event = "invalid_domain_rejected", domain = %domain);
+        return "invalid".to_string();
+    }
+    domain.trim().to_string()
 }
 
 /// Extract the `<title>` text from an HTML document.
@@ -67,7 +84,7 @@ where
                 message = %e
             );
         })
-    .when(|e| matches!(e, SearchError::Http(_) | SearchError::Wreq(_)))
+    .when(|e| matches!(e, SearchError::Http(_) | SearchError::Wreq(_) | SearchError::Api { code: "server_error", .. }))
     .await
 }
 
